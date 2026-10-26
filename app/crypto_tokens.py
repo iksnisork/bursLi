@@ -90,7 +90,11 @@ def _b64u_decode(text: str) -> bytes:
 
 def _load_or_derive_master_key() -> bytes:
     """Resolve a 32-byte AES-256 master key from env or local context key."""
-    env_key = os.environ.get("LIBRUS_MASTER_KEY", "").strip()
+    env_key = (
+        os.environ.get("LIBRUS_MASTER_KEY")
+        or os.environ.get("HUB_MASTER_KEY")
+        or ""
+    ).strip()
     if env_key:
         if len(env_key) == 64:
             try:

@@ -1203,11 +1203,12 @@ async def async_main(args: argparse.Namespace) -> None:
     dashboard_url = args.public_url or f"http://{lan_ip}:{args.port}/"
     static_dir = Path(__file__).resolve().parent / "static"
 
+    is_cloud_run = os.environ.get("K_SERVICE") is not None
     hub = StatelessLibrusHub(local_config_path=Path(args.config))
     caster = NestHubCaster(
         hub_ip=args.nest_hub_ip,
         dashboard_url=dashboard_url,
-        keep_alive=args.keep_alive,
+        keep_alive=args.keep_alive and not args.no_cast and not is_cloud_run,
     )
     app = create_app(hub, caster, static_dir)
 
