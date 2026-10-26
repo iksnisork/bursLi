@@ -1174,7 +1174,21 @@ def create_app(
     token_vault: TokenVault | None = None,
 ) -> web.Application:
     server = DashboardServer(hub, caster, static_dir, token_vault=token_vault)
-    app = web.Application()
+
+    @web.middleware
+    async def canonical_host_middleware(
+        request: web.Request,
+        handler: Any,
+    ) -> web.StreamResponse:
+        host = request.headers.get("X-Forwarded-Host") or request.host or ""
+        if host.lower().startswith("www."):
+            bare_host = host[4:]
+            proto = request.headers.get("X-Forwarded-Proto") or request.scheme or "https"
+            target_url = f"{proto}://{bare_host}{request.rel_url}"
+            raise web.HTTPMovedPermanently(location=target_url)
+        return await handler(request)
+
+    app = web.Application(middlewares=[canonical_host_middleware])
 
     app.router.add_get("/", server.handle_index)
     app.router.add_get("/favicon.ico", server.handle_favicon)
