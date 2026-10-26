@@ -32,6 +32,9 @@ const state = {
   unseenAlerts: [],
   alertIndex: 0,
   icalLinks: {},
+  urlToken: new URLSearchParams(window.location.search).get("token") || "",
+  sealedToken: "",
+  kioskUrl: "",
 };
 
 const WEEKDAYS_PL = [
@@ -173,6 +176,9 @@ function isLessonNow(dayIso, timeFrom, timeTo) {
 
 async function apiFetch(path, options = {}) {
   const headers = Object.assign({}, options.headers || {});
+  if (state.urlToken) {
+    headers["X-Librus-Token"] = state.urlToken;
+  }
   const vaultHeader = window.LibrusVault ? window.LibrusVault.getAccountsHeaderValue() : null;
   if (vaultHeader) {
     headers["X-Librus-Accounts"] = vaultHeader;
@@ -230,6 +236,8 @@ function updateStudentSubtitle() {
   const localAccs = window.LibrusVault ? window.LibrusVault.getMemoryAccounts() : [];
   if (localAccs.length > 0) {
     els.securityBadge.textContent = `VAULT (${localAccs.length})`;
+  } else if (state.urlToken) {
+    els.securityBadge.textContent = "TOKEN (RAM)";
   } else {
     els.securityBadge.textContent = "ZERO-DB";
   }
@@ -2204,6 +2212,17 @@ async function renderVaultAndCalendarModule() {
     (state.icalLinks && Object.keys(state.icalLinks).length > 0 ? state.icalLinks : null) ||
     (cachedToken && (cachedToken.ical_links || cachedToken.feeds)) ||
     {};
+  const resolvedSealedToken =
+    state.sealedToken ||
+    (cachedToken && (cachedToken.sealed_token || cachedToken.token)) ||
+    state.urlToken ||
+    "";
+  const resolvedKioskUrl =
+    state.kioskUrl ||
+    (cachedToken && cachedToken.kiosk_url) ||
+    (resolvedSealedToken
+      ? `${window.location.origin}/?token=${encodeURIComponent(resolvedSealedToken)}&nesthub=1`
+      : "");
 
   const wrapper = document.createElement("div");
   wrapper.style.display = "flex";
@@ -2269,9 +2288,7 @@ async function renderVaultAndCalendarModule() {
 
   const icsRowsHtml = [];
   Object.entries(activeLinks).forEach(([alias, f]) => {
-    const ttDownload = f.timetable_download || `/api/ical/download?account=${encodeURIComponent(alias)}&feed=timetable&download=1`;
-    const exDownload = f.exams_download || `/api/ical/download?account=${encodeURIComponent(alias)}&feed=exams&download=1`;
-    const gcalImportUrl = f.gcal_import_page || "https://calendar.google.com/calendar/u/0/r/settings/export";
+    const gcalAddByUrl = f.gcal_add_by_url_page || "https://calendar.google.com/calendar/u/0/r/settings/addbyurl";
     icsRowsHtml.push(`
       <tr>
         <td style="width:105px;"><span class="cell-primary">${escapeHtml(alias.toUpperCase())}</span></td>
@@ -2279,10 +2296,9 @@ async function renderVaultAndCalendarModule() {
         <td>
           <input class="input-field" readonly value="${escapeHtml(f.timetable_ics)}" style="height:28px;font-size:11px;width:100%;max-width:none;" />
         </td>
-        <td style="width:390px;text-align:right;white-space:nowrap;">
-          <a class="btn-primary btn-xs" href="${escapeHtml(ttDownload)}" download="plan-lekcji-${escapeHtml(alias)}.ics">1. Pobierz plik .ics</a>
-          <a class="btn-outline btn-xs" href="${escapeHtml(gcalImportUrl)}" target="_blank" rel="noopener" style="margin-left:4px;">2. Importuj w Google Cal ↗</a>
-          <button class="action-button copy-url-btn" data-url="${escapeHtml(f.timetable_ics)}" type="button" style="margin-left:4px;">Kopiuj URL</button>
+        <td style="width:320px;text-align:right;white-space:nowrap;">
+          <button class="btn-primary btn-xs copy-url-btn" data-url="${escapeHtml(f.timetable_ics)}" type="button">1. Kopiuj URL subskrypcji</button>
+          <a class="btn-outline btn-xs" href="${escapeHtml(gcalAddByUrl)}" target="_blank" rel="noopener" style="margin-left:4px;">2. Dodaj z URL w Google Cal ↗</a>
         </td>
       </tr>
       <tr>
@@ -2291,10 +2307,9 @@ async function renderVaultAndCalendarModule() {
         <td>
           <input class="input-field" readonly value="${escapeHtml(f.exams_ics)}" style="height:28px;font-size:11px;width:100%;max-width:none;" />
         </td>
-        <td style="width:390px;text-align:right;white-space:nowrap;">
-          <a class="btn-primary btn-xs" href="${escapeHtml(exDownload)}" download="sprawdziany-${escapeHtml(alias)}.ics">1. Pobierz plik .ics</a>
-          <a class="btn-outline btn-xs" href="${escapeHtml(gcalImportUrl)}" target="_blank" rel="noopener" style="margin-left:4px;">2. Importuj w Google Cal ↗</a>
-          <button class="action-button copy-url-btn" data-url="${escapeHtml(f.exams_ics)}" type="button" style="margin-left:4px;">Kopiuj URL</button>
+        <td style="width:320px;text-align:right;white-space:nowrap;">
+          <button class="btn-primary btn-xs copy-url-btn" data-url="${escapeHtml(f.exams_ics)}" type="button">1. Kopiuj URL subskrypcji</button>
+          <a class="btn-outline btn-xs" href="${escapeHtml(gcalAddByUrl)}" target="_blank" rel="noopener" style="margin-left:4px;">2. Dodaj z URL w Google Cal ↗</a>
         </td>
       </tr>
     `);
@@ -2355,7 +2370,7 @@ async function renderVaultAndCalendarModule() {
       </div>
     </div>
 
-    <!-- Section 2: iCal Feeds Table -->
+    <!-- Section 2: iCal Feeds & Kiosk / Nest Hub Display Link -->
     <div class="surface-panel content-card data-table-card">
       <div class="data-table-scroll">
         <table class="data-table">
@@ -2363,17 +2378,30 @@ async function renderVaultAndCalendarModule() {
             <tr>
               <th>PROFIL</th>
               <th>TYP KANAŁU</th>
-              <th>ADRES KANAŁU (.ICS)</th>
+              <th>ADRES SUBSKRYPCJI (.ICS / EKRAN KIOSK)</th>
               <th style="text-align:right;">
                 <span style="display:inline-flex;align-items:center;gap:6px;justify-content:flex-end;">
-                  <span>POBIERZ DO IMPORTU / SUBSKRYBUJ</span>
-                  <button id="generateIcsLinksBtn" class="action-btn refresh-btn" title="Odśwież linki .ics" type="button" style="padding:1px 6px;font-size:11px;line-height:1.2;">↻</button>
+                  <span>SUBSKRYBUJ KANAŁ (AUTOMATYCZNA AKTUALIZACJA)</span>
+                  <button id="generateIcsLinksBtn" class="action-btn refresh-btn" title="Odśwież linki subskrypcji .ics oraz token ekranu" type="button" style="padding:1px 6px;font-size:11px;line-height:1.2;">↻</button>
                 </span>
               </th>
             </tr>
           </thead>
           <tbody>
-            ${icsRowsHtml.join("") || `<tr><td colspan="4">Kliknij ikonę ↻ w nagłówku tabeli, aby utworzyć kanały kalendarza .ics.</td></tr>`}
+            ${icsRowsHtml.join("") || `<tr><td colspan="4">Kliknij ikonę ↻ w nagłówku tabeli, aby utworzyć kanały kalendarza .ics oraz zaszyfrowany link dla ekranu.</td></tr>`}
+            ${resolvedKioskUrl ? `
+            <tr>
+              <td style="width:105px;"><span class="cell-primary">WSZYSTKIE</span></td>
+              <td style="width:170px;"><span class="badge badge-now">EKRAN / NEST HUB</span></td>
+              <td>
+                <input class="input-field" readonly value="${escapeHtml(resolvedKioskUrl)}" style="height:28px;font-size:11px;width:100%;max-width:none;" />
+              </td>
+              <td style="width:390px;text-align:right;white-space:nowrap;">
+                <span class="card-subtitle" style="margin-right:6px;">Token AES-256-GCM (tylko RAM)</span>
+                <button class="btn-primary btn-xs copy-kiosk-url-btn" data-url="${escapeHtml(resolvedKioskUrl)}" type="button">Kopiuj link dla ekranu / Nest Hub</button>
+              </td>
+            </tr>
+            ` : ""}
           </tbody>
         </table>
       </div>
@@ -2519,10 +2547,12 @@ async function renderVaultAndCalendarModule() {
         });
         window.LibrusVault.setCachedSealedToken(res);
         state.icalLinks = res.ical_links || res.feeds || {};
+        state.sealedToken = res.sealed_token || res.token || state.sealedToken;
+        state.kioskUrl = res.kiosk_url || state.kioskUrl;
       } else {
         await bootstrapProfiles();
       }
-      showToast("Odświeżono kanały i pliki .ics!");
+      showToast("Odświeżono kanały .ics oraz zaszyfrowany link dla ekranu!");
       await renderVaultAndCalendarModule();
     } catch (err) {
       showToast(`${err.message}`);
@@ -2533,6 +2563,13 @@ async function renderVaultAndCalendarModule() {
     btn.onclick = () => {
       navigator.clipboard.writeText(btn.dataset.url);
       showToast("Skopiowano adres .ics do schowka!");
+    };
+  });
+
+  wrapper.querySelectorAll(".copy-kiosk-url-btn").forEach((btn) => {
+    btn.onclick = () => {
+      navigator.clipboard.writeText(btn.dataset.url);
+      showToast("Skopiowano zaszyfrowany link dla ekranu / Nest Hub do schowka!");
     };
   });
 }
@@ -2598,6 +2635,12 @@ async function bootstrapProfiles() {
     const data = await apiFetch("/api/profiles");
     state.profiles = data.profiles || [];
     state.icalLinks = data.ical_links || {};
+    state.sealedToken = data.sealed_token || data.token || state.urlToken || "";
+    state.kioskUrl =
+      data.kiosk_url ||
+      (state.sealedToken
+        ? `${window.location.origin}/?token=${encodeURIComponent(state.sealedToken)}&nesthub=1`
+        : "");
     if (state.profiles.length > 0) {
       if (!state.activeAccount || !state.profiles.some((p) => (p.alias || p.account) === state.activeAccount)) {
         state.activeAccount = state.profiles[0].alias || state.profiles[0].account;

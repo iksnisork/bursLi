@@ -144,7 +144,7 @@
         <span><strong>burs<span class="brand-cap-l">L</span>i</strong> (<a href="https://bursli.com" target="_blank" rel="noopener">bursli.com</a>) by Krzysztof Rosiński · Powered by <a href="https://github.com/krzysztofbury/librus-mcp" target="_blank" rel="noopener">librus-mcp</a> by Krzysztof Bury · Hosted on <strong>Google Cloud</strong> courtesy of <a href="https://salestube.tech" target="_blank" rel="noopener">Salestube</a> · Open Source under the MIT License (strictly for non-commercial use)</span>
       </div>
       <div class="site-footer-line site-footer-secondary">
-        <span>Security &amp; Privacy: Librus credentials are encrypted locally in your browser (IndexedDB) using <strong>AES-GCM 256-bit</strong> and never stored on any server · <strong>Zero-Database</strong> architecture · Stateless <code>.ics</code> calendar tokens are decrypted exclusively in RAM.</span>
+        <span>Security &amp; Privacy: Librus credentials are encrypted locally in your browser (IndexedDB) using <strong>AES-GCM 256-bit</strong> and never stored on any server · <strong>Zero-Database</strong> architecture · Stateless <code>.ics</code> calendar &amp; Kiosk/Nest Hub display tokens (<code>lfh1...</code>) are decrypted exclusively in RAM.</span>
       </div>
     </footer>
 
@@ -210,10 +210,10 @@
 
           <div class="scope-box" style="border-left:3px solid var(--pastel-blue-border);">
             <div style="font-family:var(--accent-mono);font-size:11px;font-weight:700;text-transform:uppercase;color:var(--pastel-blue-fg);margin-bottom:4px;">
-              3. Bezpieczeństwo modułu kalendarza (.ics)
+              3. Bezpieczeństwo modułu kalendarza (.ics) oraz ekranów Kiosk / Nest Hub
             </div>
             <p style="font-size:13px;line-height:1.5;">
-              Moduł kalendarza generuje pliki i kanały <code>.ics</code> bez zapisywania Twojego konta na serwerze. Adres subskrypcji wykorzystuje kryptograficznie zapieczętowany token (<code>AES-GCM</code>), który jest odszyfrowywany wyłącznie w ulotnej pamięci RAM na ułamek sekundy podczas odświeżania kalendarza. Możesz również pobrać statyczny plik <code>.ics</code> bezpośrednio na dysk.
+              Moduł kalendarza oraz opcjonalny link dla zewnętrznych ekranów (np. Google Nest Hub) działają bez zapisywania Twojego konta na serwerze. Adres subskrypcji <code>.ics</code> oraz link dla ekranu (<code>?token=lfh1...</code>) wykorzystują ten sam kryptograficznie zapieczętowany token (<code>AES-256-GCM</code>), który jest odszyfrowywany wyłącznie w ulotnej pamięci RAM na ułamek sekundy podczas automatycznego odświeżania widoku lub kalendarza.
             </p>
           </div>
 
@@ -229,7 +229,7 @@
     <div class="toast hidden" id="toastBox"></div>
   </div>
 
-  <script src="/static/crypto-vault.js?v=18"></script>
-  <script src="/static/app.js?v=18"></script>
+  <script src="/static/crypto-vault.js?v=20"></script>
+  <script src="/static/app.js?v=20"></script>
 </body>
 </html>

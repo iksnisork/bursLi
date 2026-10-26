@@ -300,6 +300,7 @@ class DashboardServer:
                 "exams_webcal": webcal_ex,
                 "exams_gcal_add": f"https://calendar.google.com/calendar/r?cid={quote(webcal_ex, safe='')}",
                 "gcal_import_page": "https://calendar.google.com/calendar/u/0/r/settings/export",
+                "gcal_add_by_url_page": "https://calendar.google.com/calendar/u/0/r/settings/addbyurl",
             }
         return links
 
@@ -500,10 +501,13 @@ class DashboardServer:
             aliases = [a.alias for a in vault.accounts]
             base_url = self._base_url(request)
             ical_links = self._build_ical_links(base_url, token, aliases)
+            kiosk_url = f"{base_url}/?token={quote(token, safe='')}&nesthub=1"
             return web.json_response(
                 {
                     "ok": True,
                     "token": token,
+                    "sealed_token": token,
+                    "kiosk_url": kiosk_url,
                     "profiles": profiles,
                     "ical_links": ical_links,
                     "feeds": ical_links,
@@ -579,10 +583,13 @@ class DashboardServer:
             ical_links = self._build_ical_links(
                 base_url, token, [a.alias for a in vault.accounts]
             )
+            kiosk_url = f"{base_url}/?token={quote(token, safe='')}&nesthub=1"
             return web.json_response(
                 {
                     "profiles": profiles,
                     "mode": mode,
+                    "sealed_token": token,
+                    "kiosk_url": kiosk_url,
                     "ical_links": ical_links,
                     "default_monday": current_monday().isoformat(),
                     "today": date.today().isoformat(),
