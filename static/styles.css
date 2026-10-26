@@ -782,14 +782,14 @@ textarea {
   justify-content: space-between;
   border: 1px solid var(--line-strong);
   background: var(--panel);
-  flex-shrink: 0;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
 }
 
 .day-pills-group {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  flex: 1 1 560px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .day-strip-controls {
@@ -799,21 +799,24 @@ textarea {
   padding: 4px 8px;
   background: var(--table-heading-bg);
   border-left: 1px solid var(--line-strong);
-  flex-shrink: 0;
+  flex: 0 0 auto;
 }
 
 .day-pill {
   position: relative;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 6px 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 5px 10px;
+  min-width: 0;
   border: 0;
   border-right: 1px solid var(--line);
   background: var(--control-bg);
   color: var(--muted);
   cursor: pointer;
+  text-align: left;
 }
 
 .day-pill:last-child {
@@ -838,15 +841,27 @@ textarea {
 
 .day-pill .day-name {
   font-family: var(--accent-mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.15;
   text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .day-pill .day-date {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 1.15;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  opacity: 0.92;
 }
 
 /* ==========================================================================
@@ -1225,26 +1240,30 @@ textarea {
 }
 
 .week-col-header {
-  padding: 8px 10px;
+  padding: 7px 9px;
   background: var(--table-heading-bg);
   border-bottom: 1px solid var(--line-strong);
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 2px 6px;
 }
 
 .week-col-header h3 {
   font-family: var(--accent-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text);
+  white-space: nowrap;
 }
 
 .week-col-header span {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .mini-lesson {
@@ -2070,7 +2089,6 @@ textarea {
    ========================================================================== */
 
 /* TIER 1: GOOGLE NEST HUB (1024x600) */
-:root[data-device="nesthub"] .app-shell,
 @media (max-height: 680px) and (min-width: 769px) {
   .app-shell {
     padding: 4px 8px;
@@ -2138,6 +2156,16 @@ textarea {
 
   .day-pill {
     padding: 4px 8px;
+    gap: 1px;
+  }
+
+  .day-pill .day-name {
+    font-size: 10px;
+    letter-spacing: 0.04em;
+  }
+
+  .day-pill .day-date {
+    font-size: 9.5px;
   }
 
   .pi-action-bar {
@@ -2147,14 +2175,47 @@ textarea {
 
   .data-table th,
   .data-table td {
-    padding: 5px 8px;
+    padding: 4px 8px;
     font-size: 12px;
+  }
+
+  .site-footer {
+    padding: 3px 8px;
+    font-size: 9.5px;
+    gap: 1px;
+  }
+
+  .site-footer-secondary {
+    font-size: 9px;
+    padding-top: 1px;
   }
 }
 
 :root[data-device="nesthub"] #castBtn,
 :root[data-device="nesthub"] #enableNotificationsBtn {
   display: none !important;
+}
+
+/* TIER 2: MEDIUM TABLETS & COMPACT WINDOWS (<= 980px) */
+@media (max-width: 980px) {
+  .day-selector-strip {
+    flex-direction: column;
+  }
+
+  .day-pills-group {
+    flex: 0 0 auto;
+    width: 100%;
+    grid-template-columns: repeat(5, minmax(96px, 1fr));
+    overflow-x: auto;
+  }
+
+  .day-strip-controls {
+    border-left: 0;
+    border-top: 1px solid var(--line-strong);
+    justify-content: space-between;
+    width: 100%;
+    flex-wrap: wrap;
+  }
 }
 
 /* TIER 3: MOBILE SMARTPHONES (<= 768px) */
@@ -2201,28 +2262,21 @@ textarea {
     text-align: center;
   }
 
-  .day-selector-strip {
-    flex-direction: column;
-  }
-
-  .day-pills-group {
-    grid-template-columns: repeat(5, minmax(84px, 1fr));
-    overflow-x: auto;
-  }
-
-  .day-strip-controls {
-    border-left: 0;
-    border-top: 1px solid var(--line-strong);
-    justify-content: space-between;
-    width: 100%;
-    flex-wrap: wrap;
-  }
-
   .day-pill {
     flex-direction: column;
     align-items: flex-start;
-    padding: 5px 7px;
+    justify-content: center;
+    padding: 5px 6px;
     gap: 2px;
+  }
+
+  .day-pill .day-name {
+    font-size: 9.5px;
+    letter-spacing: 0.02em;
+  }
+
+  .day-pill .day-date {
+    font-size: 9.5px;
   }
 
   .stats-banner {
