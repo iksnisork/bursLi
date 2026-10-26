@@ -1,0 +1,22 @@
+[project]
+name = "bursli"
+version = "1.0.0"
+description = "bursLi (bursli.com) — Stateless Zero-Database Librus Synergia Family Hub on Google Cloud Run"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.14"
+dependencies = [
+    "aiohttp>=3.10.0",
+    "cryptography>=43.0.0",
+    "librus-mcp==2.2.1",
+    "mcp>=1.0.0",
+    "pydantic>=2.8.0",
+    "pychromecast>=14.0.0",
+    "pypdf>=5.0.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+

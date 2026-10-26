@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="pl" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes" />
+  <title>bursLi — Plan, Sprawdziany, Zadania, Oceny, Wiadomości &amp; Kalendarz</title>
+  <link rel="manifest" href="/static/manifest.json" />
+  <link rel="stylesheet" href="/static/fonts/option-f-fonts.css?v=18" />
+  <link rel="stylesheet" href="/static/styles.css?v=18" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Top Header (Clean, single-row non-overlapping bar) -->
+    <header class="topbar">
+      <div class="brand-group" id="brandLogoHomeBtn" role="button" tabindex="0" title="bursLi — przejdź do strony głównej (01 Plan)">
+        <div class="brand-badge" aria-hidden="true">
+          <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <!-- Outer capital 'L' architectural bracket framing the lowercase 'b' -->
+            <path d="M5 4.5V23.5H23" stroke="#72a8de" stroke-width="2.6" stroke-linecap="square" stroke-linejoin="miter" />
+          </svg>
+          <span class="brand-badge-b">b</span>
+        </div>
+        <div class="brand-meta">
+          <div class="brand-title-row">
+            <h1 class="app-title">burs<span class="brand-cap-l">L</span>i</h1>
+            <span id="studentInfoText" class="subtitle-pill hidden">...</span>
+          </div>
+          <div class="subtitle-row">
+            <span id="securityBadge" class="security-pill">ZERO-DB VAULT</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Profile Switcher Dropdown (scales cleanly to 3-4+ children) -->
+      <div class="profile-switcher" id="profileSwitcher">
+        <select id="profileSelect" class="profile-select" aria-label="Wybierz profil ucznia"></select>
+      </div>
+
+      <!-- Primary Module Navigation -->
+      <nav class="module-nav" id="moduleNav" aria-label="Moduły aplikacji">
+        <button class="module-tab active" data-module="timetable" id="tabTimetable" type="button">
+          <span class="tab-index">01</span>
+          <span class="tab-label">Plan</span>
+        </button>
+        <button class="module-tab" data-module="exams" id="tabExams" type="button">
+          <span class="tab-index">02</span>
+          <span class="tab-label">Sprawdziany</span>
+          <span class="tab-badge hidden" id="badgeExams">0</span>
+        </button>
+        <button class="module-tab" data-module="materials" id="tabMaterials" type="button">
+          <span class="tab-index">03</span>
+          <span class="tab-label">Zadania</span>
+          <span class="tab-badge hidden" id="badgeMaterials">0</span>
+        </button>
+        <button class="module-tab" data-module="grades" id="tabGrades" type="button">
+          <span class="tab-index">04</span>
+          <span class="tab-label">Oceny</span>
+        </button>
+        <button class="module-tab" data-module="messages" id="tabMessages" type="button">
+          <span class="tab-index">05</span>
+          <span class="tab-label">Wiadomości</span>
+          <span class="tab-badge hidden" id="badgeMessages">0</span>
+        </button>
+        <button class="module-tab" data-module="vault" id="tabVault" title="Kalendarz Google (.ics), Alerty i Konta Librus" type="button">
+          <span class="tab-index">06</span>
+          <span class="tab-label">Konta &amp; .ics</span>
+        </button>
+      </nav>
+
+      <!-- Clock, Bell Notifications, Privacy Info & Quick Actions -->
+      <div class="clock-controls">
+        <div class="live-clock" id="liveClock">--:--</div>
+
+        <!-- Notification Bell + Narrow Stepper Popover -->
+        <div class="alert-bell-wrap" id="alertBellWrap">
+          <button class="action-btn alert-bell-btn" id="alertBellBtn" title="Powiadomienia i zmiany" type="button">
+            <span aria-hidden="true">🔔</span>
+            <span id="alertCountBadge" class="alert-count-badge hidden">0</span>
+          </button>
+          <div id="alertPopover" class="alert-popover hidden" role="dialog" aria-label="Powiadomienia">
+            <div class="alert-popover-header">
+              <span class="meta-chip badge-sub" id="alertSeverityBadge">POWIADOMIENIE</span>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <div class="alert-stepper" id="alertStepper">
+                  <button id="prevAlertBtn" class="alert-step-btn" title="Poprzednie powiadomienie" type="button">←</button>
+                  <span id="alertCounter" class="alert-step-counter">1 / 1</span>
+                  <button id="nextAlertBtn" class="alert-step-btn" title="Następne powiadomienie" type="button">→</button>
+                </div>
+                <button id="closeAlertPopoverBtn" class="alert-step-btn" title="Zamknij" type="button" style="border:1px solid var(--line-strong);background:var(--control-bg);">✕</button>
+              </div>
+            </div>
+            <div id="alertBannerText" class="alert-popover-body" title="Kliknij, aby otworzyć szczegóły">
+              Brak nowych powiadomień.
+            </div>
+            <div class="alert-popover-actions">
+              <div style="display:flex;gap:4px;">
+                <button id="openAlertBtn" class="btn-xs btn-primary" type="button">Otwórz</button>
+                <button id="dismissAlertsBtn" class="btn-xs btn-outline" type="button">Ukryj</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button class="action-btn" id="openWelcomeModalBtn" title="O projekcie bursLi — Open Source i prywatność danych" type="button">
+          ⓘ
+        </button>
+        <button class="action-btn theme-btn" id="themeToggleBtn" title="Przełącz motyw Jasny / Ciemny" type="button">
+          <span id="themeIcon">◐</span> <span class="btn-label" id="themeLabel">Ciemny</span>
+        </button>
+        <button class="action-btn refresh-btn" id="refreshBtn" title="Odśwież bieżący moduł" type="button">
+          ↻
+        </button>
+      </div>
+    </header>
+
+    <!-- Unified Day Selector & Timetable Controls Strip (Visible in Module 01 Plan) -->
+    <div class="day-selector-strip" id="daySelectorStrip">
+      <div class="day-pills-group" id="dayPillsGroup"></div>
+      <div class="day-strip-controls">
+        <div class="week-nav">
+          <button class="nav-btn" id="prevWeekBtn" title="Poprzedni tydzień" type="button">←</button>
+          <button class="nav-btn today-btn" id="thisWeekBtn" title="Bieżący tydzień" type="button">Dziś</button>
+          <button class="nav-btn" id="nextWeekBtn" title="Następny tydzień" type="button">→</button>
+          <span class="week-range-label" id="weekRangeLabel">---</span>
+        </div>
+        <div class="view-mode-group">
+          <button class="mode-btn active" data-mode="today" id="modeTodayBtn" type="button">Dzień</button>
+          <button class="mode-btn" data-mode="week" id="modeWeekBtn" type="button">Tydzień</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <main class="content-area" id="contentArea">
+      <div class="loading-state">
+        <div class="spinner"></div>
+        <p>Pobieranie danych z Librus Synergia...</p>
+      </div>
+    </main>
+
+    <!-- 2-Line Site Footer (Credits, Hosting, OSS License & Zero-DB Security Footnote) -->
+    <footer class="site-footer" role="contentinfo">
+      <div class="site-footer-line site-footer-primary">
+        <span><strong>burs<span class="brand-cap-l">L</span>i</strong> (<a href="https://bursli.com" target="_blank" rel="noopener">bursli.com</a>) by Krzysztof Rosiński · Powered by <a href="https://github.com/krzysztofbury/librus-mcp" target="_blank" rel="noopener">librus-mcp</a> by Krzysztof Bury · Hosted on <strong>Google Cloud</strong> courtesy of <a href="https://salestube.tech" target="_blank" rel="noopener">Salestube</a> · Open Source under the MIT License (strictly for non-commercial use)</span>
+      </div>
+      <div class="site-footer-line site-footer-secondary">
+        <span>Security &amp; Privacy: Librus credentials are encrypted locally in your browser (IndexedDB) using <strong>AES-GCM 256-bit</strong> and never stored on any server · <strong>Zero-Database</strong> architecture · Stateless <code>.ics</code> calendar tokens are decrypted exclusively in RAM.</span>
+      </div>
+    </footer>
+
+    <!-- StudyCard Modal (Detailed Exam Scope + Interactive Checklist) -->
+    <div id="studyModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <div>
+            <span id="studyModalBadge" class="badge">Sprawdzian</span>
+            <h2 id="studyModalTitle" class="modal-title">Zakres materiału</h2>
+            <p id="studyModalMeta" class="modal-subtitle"></p>
+          </div>
+          <button class="modal-close-btn" id="closeStudyModalBtn" type="button">✕</button>
+        </div>
+        <div class="modal-body" id="studyModalBody"></div>
+      </div>
+    </div>
+
+    <!-- Message & Attachment Reader + 2-Step Reply Modal -->
+    <div id="messageModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <div>
+            <span class="badge badge-info" id="messageModalFolderBadge">Wiadomość</span>
+            <h2 id="messageModalSubject" class="modal-title">Temat wiadomości</h2>
+            <p id="messageModalMeta" class="modal-subtitle"></p>
+          </div>
+          <button class="modal-close-btn" id="closeMessageModalBtn" type="button">✕</button>
+        </div>
+        <div class="modal-body" id="messageModalBody"></div>
+      </div>
+    </div>
+
+    <!-- First-Run Welcome & Security / Open Source Info Modal -->
+    <div id="welcomeModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="welcomeModalTitle">
+      <div class="modal-card" style="max-width:640px;">
+        <div class="modal-header">
+          <div>
+            <span class="badge badge-now">OPEN SOURCE · ZERO-DATABASE VAULT</span>
+            <h2 id="welcomeModalTitle" class="modal-title">Witaj w bursLi — prywatnym panelu Librus Synergia</h2>
+            <p class="modal-subtitle">Przejrzysty kod źródłowy · lokalne szyfrowanie w przeglądarce · brak bazy danych na serwerze</p>
+          </div>
+          <button class="modal-close-btn" id="closeWelcomeModalBtn" type="button">✕</button>
+        </div>
+        <div class="modal-body" style="gap:10px;">
+          <div class="scope-box" style="border-left:3px solid var(--accent-primary);">
+            <div style="font-family:var(--accent-mono);font-size:11px;font-weight:700;text-transform:uppercase;color:var(--accent-primary);margin-bottom:4px;">
+              1. Rozwiązanie w 100% Open Source (MIT · Non-Commercial Use)
+            </div>
+            <p style="font-size:13px;line-height:1.5;">
+              <strong>bursLi</strong> (<a href="https://bursli.com" target="_blank" rel="noopener">bursli.com</a>, anagram słowa <em>Librus</em>) to w pełni otwartoźródłowy, niekomercyjny projekt dla rodziców i uczniów, oparty na silniku <a href="https://github.com/krzysztofbury/librus-mcp" target="_blank" rel="noopener">librus-mcp</a> by Krzysztof Bury i hostowany w chmurze Google Cloud dzięki uprzejmości <a href="https://salestube.tech" target="_blank" rel="noopener">Salestube</a>.
+            </p>
+          </div>
+
+          <div class="scope-box" style="border-left:3px solid var(--accent-emerald);">
+            <div style="font-family:var(--accent-mono);font-size:11px;font-weight:700;text-transform:uppercase;color:var(--accent-emerald);margin-bottom:4px;">
+              2. Dane logowania zapisane wyłącznie lokalnie (Zero-Database)
+            </div>
+            <p style="font-size:13px;line-height:1.5;">
+              Twoje loginy i hasła do Librus Synergia (zarówno konto rodzica, jak i konto dziecka) są szyfrowane kluczem <strong>AES-GCM 256-bit</strong> i zapisywane <strong>wyłącznie lokalnie w pamięci Twojej przeglądarki (IndexedDB)</strong>. Dane nie są składowane w żadnej bazie danych na serwerze i nie są przekazywane nigdzie dalej (cała synteza sprawdzianów, załączników DOCX/PDF i zadań działa deterministycznie w pamięci RAM).
+            </p>
+          </div>
+
+          <div class="scope-box" style="border-left:3px solid var(--pastel-blue-border);">
+            <div style="font-family:var(--accent-mono);font-size:11px;font-weight:700;text-transform:uppercase;color:var(--pastel-blue-fg);margin-bottom:4px;">
+              3. Bezpieczeństwo modułu kalendarza (.ics)
+            </div>
+            <p style="font-size:13px;line-height:1.5;">
+              Moduł kalendarza generuje pliki i kanały <code>.ics</code> bez zapisywania Twojego konta na serwerze. Adres subskrypcji wykorzystuje kryptograficznie zapieczętowany token (<code>AES-GCM</code>), który jest odszyfrowywany wyłącznie w ulotnej pamięci RAM na ułamek sekundy podczas odświeżania kalendarza. Możesz również pobrać statyczny plik <code>.ics</code> bezpośrednio na dysk.
+            </p>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:4px;flex-wrap:wrap;">
+            <span class="card-subtitle">Informację tę otworzysz ponownie w każdej chwili przyciskiem <strong>[ ⓘ ]</strong> na górnym pasku.</span>
+            <button id="ackWelcomeModalBtn" class="btn-primary" type="button">Rozumiem, przejdź do bursLi</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast hidden" id="toastBox"></div>
+  </div>
+
+  <script src="/static/crypto-vault.js?v=18"></script>
+  <script src="/static/app.js?v=18"></script>
+</body>
+</html>

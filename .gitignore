@@ -1,0 +1,33 @@
+# Python & Virtual Environments
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local Secrets, Keys & Credentials (NEVER COMMIT)
+.gcp_hub_master_key
+*.key
+*.pem
+.env
+.env.*
+accounts.json
+student_accounts.json
+*credentials*.json
+*secret*.json
+
+# macOS / IDE / Temp
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.log
+
+# Scratch / UI Font Comparison Mockups & Local Deployment Scripts
+static/font-mockups.html
+deploy/
+*deploy*.sh
