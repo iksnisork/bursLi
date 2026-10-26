@@ -420,6 +420,12 @@ class DashboardServer:
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
 
+    async def handle_favicon(self, _request: web.Request) -> web.FileResponse:
+        return web.FileResponse(self.static_dir / "favicon.ico")
+
+    async def handle_apple_touch_icon(self, _request: web.Request) -> web.FileResponse:
+        return web.FileResponse(self.static_dir / "apple-touch-icon.png")
+
     async def handle_status(self, request: web.Request) -> web.Response:
         local_vault = load_local_config_vault(self.hub.local_config_path)
         base_url = self._base_url(request)
@@ -1171,6 +1177,8 @@ def create_app(
     app = web.Application()
 
     app.router.add_get("/", server.handle_index)
+    app.router.add_get("/favicon.ico", server.handle_favicon)
+    app.router.add_get("/apple-touch-icon.png", server.handle_apple_touch_icon)
     app.router.add_get("/api/status", server.handle_status)
     app.router.add_post("/api/vault/seal", server.handle_vault_seal)
     app.router.add_post("/api/vault/student-account", server.handle_student_account)
