@@ -7,8 +7,8 @@
 ## 🔒 Security & Privacy Architecture (Zero-Database)
 
 1. **Client-Side Encrypted Vault (`IndexedDB` + `AES-GCM 256-bit`)** - All Librus Synergia credentials (both parent and student accounts) are encrypted using the browser's native `Web Crypto API (AES-GCM 256-bit)` and stored **exclusively locally in the user's browser (`IndexedDB`)**.
-2. **Stateless In-RAM Server Processing** - The backend stores zero user accounts, zero passwords, and zero student data on disk. All exam scope synthesis, `.docx`/`.pdf`/`.txt` attachment parsing, and task clustering run 100% deterministically in RAM during an HTTPS request and are immediately discarded.
-3. **Stateless `.ics` Calendar Feeds & Smart Display / Kiosk Links (`lfh1...`)** - iCalendar subscriptions (`timetable.ics` and `exams.ics` for Google Calendar and Apple Calendar) and optional Kiosk / Google Nest Hub display URLs (`/?token=lfh1...&nesthub=1`) use the same cryptographically sealed `AES-256-GCM` envelope token decrypted exclusively in RAM for the duration of a single refresh request.
+2. **Stateless In-RAM Server Processing** - The backend stores zero user accounts, zero passwords, and zero student data on disk or in any database. All exam scope synthesis, `.docx`/`.pdf`/`.txt` attachment parsing, and task clustering run 100% deterministically in ephemeral RAM during active sessions (with short-lived in-RAM caching to prevent Librus rate-limiting).
+3. **Stateless `.ics` Calendar Feeds & Smart Display / Kiosk Links (`lfh1...`)** - iCalendar subscriptions (`timetable.ics` and `exams.ics` for Google Calendar and Apple Calendar) and optional Kiosk / Google Nest Hub display URLs (`/?token=lfh1...&nesthub=1`) use cryptographically sealed, read-only `AES-256-GCM` envelope tokens (`scope="ical"` / `scope="kiosk"`) decrypted exclusively in volatile RAM during refresh requests.
 
 ---
 

@@ -1734,6 +1734,8 @@ def synthesize_action_item(
 class StudyAssistant:
     """Deterministic in-RAM synthesizer that combines Terminarz, Messages, Announcements & Lessons."""
 
+    MAX_CACHE_SIZE = 512
+
     def __init__(self) -> None:
         self.model_name = "deterministic-synthesis"
         self._cache: dict[str, dict[str, Any]] = {}
@@ -1752,6 +1754,10 @@ class StudyAssistant:
 
         if cache_key in self._cache:
             return self._cache[cache_key]
+
+        if len(self._cache) >= self.MAX_CACHE_SIZE:
+            oldest_key = next(iter(self._cache))
+            self._cache.pop(oldest_key, None)
 
         fallback = self._build_deterministic_summary(card)
         self._cache[cache_key] = fallback

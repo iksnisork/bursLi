@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes" />
+  <meta name="referrer" content="no-referrer" />
   <title>bursLi — Plan, Sprawdziany, Zadania, Oceny, Wiadomości &amp; Kalendarz</title>
-  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=22" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=23" />
   <link rel="alternate icon" href="/favicon.ico" />
-  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=22" />
-  <link rel="manifest" href="/static/manifest.json?v=22" />
-  <link rel="stylesheet" href="/static/fonts/option-f-fonts.css?v=21" />
-  <link rel="stylesheet" href="/static/styles.css?v=21" />
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=23" />
+  <link rel="manifest" href="/static/manifest.json?v=23" />
+  <link rel="stylesheet" href="/static/fonts/option-f-fonts.css?v=23" />
+  <link rel="stylesheet" href="/static/styles.css?v=23" />
 </head>
 <body>
   <div class="app-shell">
@@ -141,16 +142,6 @@
       </div>
     </main>
 
-    <!-- 2-Line Site Footer (Credits, Hosting, OSS License & Zero-DB Security Footnote) -->
-    <footer class="site-footer" role="contentinfo">
-      <div class="site-footer-line site-footer-primary">
-        <span><strong>burs<span class="brand-cap-l">L</span>i</strong> (<a href="https://bursli.com" target="_blank" rel="noopener">bursli.com</a>) by Krzysztof Rosiński · Powered by <a href="https://github.com/krzysztofbury/librus-mcp" target="_blank" rel="noopener">librus-mcp</a> by Krzysztof Bury · Hosted on <strong>Google Cloud</strong> courtesy of <a href="https://salestube.tech" target="_blank" rel="noopener">Salestube</a> · Open Source under the MIT License (strictly for non-commercial use)</span>
-      </div>
-      <div class="site-footer-line site-footer-secondary">
-        <span>Security &amp; Privacy: Librus credentials are encrypted locally in your browser (IndexedDB) using <strong>AES-GCM 256-bit</strong> and never stored on any server · <strong>Zero-Database</strong> architecture · Stateless <code>.ics</code> calendar &amp; Kiosk/Nest Hub display tokens (<code>lfh1...</code>) are decrypted exclusively in RAM.</span>
-      </div>
-    </footer>
-
     <!-- StudyCard Modal (Detailed Exam Scope + Interactive Checklist) -->
     <div id="studyModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
       <div class="modal-card modal-lg">
@@ -198,7 +189,7 @@
               1. Rozwiązanie w 100% Open Source (MIT · Non-Commercial Use)
             </div>
             <p style="font-size:13px;line-height:1.5;">
-              <strong>bursLi</strong> (<a href="https://bursli.com" target="_blank" rel="noopener">bursli.com</a>, anagram słowa <em>Librus</em>) to w pełni otwartoźródłowy, niekomercyjny projekt dla rodziców i uczniów, oparty na silniku <a href="https://github.com/krzysztofbury/librus-mcp" target="_blank" rel="noopener">librus-mcp</a> by Krzysztof Bury i hostowany w chmurze Google Cloud dzięki uprzejmości <a href="https://salestube.tech" target="_blank" rel="noopener">Salestube</a>.
+              <strong>bursLi</strong> (<a href="https://bursli.com" target="_blank" rel="noopener">bursli.com</a>, anagram słowa <em>Librus</em>) by Krzysztof Rosiński to w pełni otwartoźródłowy, niekomercyjny projekt dla rodziców i uczniów, oparty na silniku <a href="https://github.com/krzysztofbury/librus-mcp" target="_blank" rel="noopener">librus-mcp</a> by Krzysztof Bury i hostowany w chmurze Google Cloud dzięki uprzejmości <a href="https://salestube.tech" target="_blank" rel="noopener">Salestube</a>.
             </p>
           </div>
 
@@ -216,7 +207,7 @@
               3. Bezpieczeństwo modułu kalendarza (.ics) oraz ekranów Kiosk / Nest Hub
             </div>
             <p style="font-size:13px;line-height:1.5;">
-              Moduł kalendarza oraz opcjonalny link dla zewnętrznych ekranów (np. Google Nest Hub) działają bez zapisywania Twojego konta na serwerze. Adres subskrypcji <code>.ics</code> oraz link dla ekranu (<code>?token=lfh1...</code>) wykorzystują ten sam kryptograficznie zapieczętowany token (<code>AES-256-GCM</code>), który jest odszyfrowywany wyłącznie w ulotnej pamięci RAM na ułamek sekundy podczas automatycznego odświeżania widoku lub kalendarza.
+              Moduł kalendarza oraz opcjonalny link dla zewnętrznych ekranów (np. Google Nest Hub) działają bez zapisywania Twojego konta w bazie danych na serwerze. Adres subskrypcji <code>.ics</code> oraz link dla ekranu (<code>?token=lfh1...</code>) wykorzystują kryptograficznie zapieczętowane tokeny (<code>AES-256-GCM</code>) o ograniczonych uprawnieniach (tylko do odczytu), które są odszyfrowywane i przetwarzane wyłącznie w ulotnej pamięci RAM serwera podczas odświeżania widoku lub kalendarza (zero zapisu na dysk).
             </p>
           </div>
 
@@ -232,7 +223,7 @@
     <div class="toast hidden" id="toastBox"></div>
   </div>
 
-  <script src="/static/crypto-vault.js?v=21"></script>
-  <script src="/static/app.js?v=21"></script>
+  <script src="/static/crypto-vault.js?v=23"></script>
+  <script src="/static/app.js?v=23"></script>
 </body>
 </html>

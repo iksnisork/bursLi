@@ -15,6 +15,11 @@ COPY app ./app
 COPY static ./static
 COPY server.py ./
 
+RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin appuser \
+    && chown -R appuser:appuser /app
+
+USER 10001
+
 EXPOSE 8080
 
 CMD ["python", "server.py", "--no-cast", "--port", "8080"]

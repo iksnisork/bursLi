@@ -2025,66 +2025,6 @@ textarea {
 }
 
 /* ==========================================================================
-   12B. 2-LINE SITE FOOTER (CREDITS, HOSTING, OSS LICENSE & ZERO-DB FOOTNOTE)
-   ========================================================================== */
-.site-footer {
-  flex-shrink: 0;
-  background: var(--panel);
-  border: 1px solid var(--line-strong);
-  padding: 5px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  line-height: 1.35;
-  color: var(--muted-strong);
-}
-
-.site-footer-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.site-footer-primary {
-  color: var(--text);
-}
-
-.site-footer-secondary {
-  color: var(--muted);
-  font-size: 10px;
-  border-top: 1px dashed var(--line);
-  padding-top: 2px;
-}
-
-.site-footer a {
-  color: var(--accent);
-  font-weight: 700;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.site-footer a:hover {
-  color: var(--text);
-}
-
-.site-footer .brand-cap-l {
-  color: var(--accent);
-  font-weight: 800;
-}
-
-.site-footer code {
-  font-family: var(--mono);
-  font-size: 10px;
-  background: var(--control-bg);
-  border: 1px solid var(--line);
-  padding: 0 4px;
-}
-
-/* ==========================================================================
    13. 3-TIER RESPONSIVE DESIGN SYSTEM
    ========================================================================== */
 
@@ -2177,17 +2117,6 @@ textarea {
   .data-table td {
     padding: 4px 8px;
     font-size: 12px;
-  }
-
-  .site-footer {
-    padding: 3px 8px;
-    font-size: 9.5px;
-    gap: 1px;
-  }
-
-  .site-footer-secondary {
-    font-size: 9px;
-    padding-top: 1px;
   }
 }
 

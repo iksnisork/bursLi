@@ -29,6 +29,7 @@ TOKEN_PREFIX = "lfh1."
 REPLY_PREFIX = "rpl1."
 DEFAULT_TOKEN_TTL_SECONDS = 365 * 24 * 3600  # 1 year for .ics calendar feeds
 REPLY_TOKEN_TTL_SECONDS = 5 * 60             # 5 minutes for 2-step message send
+VALID_TOKEN_SCOPES = ("full", "kiosk", "ical")
 
 
 class TokenValidationError(ValueError):
@@ -66,6 +67,7 @@ class UnsealedVaultPayload:
     expires_at: int = field(
         default_factory=lambda: int(time.time()) + DEFAULT_TOKEN_TTL_SECONDS
     )
+    scope: str = "full"
 
     def fingerprint(self) -> str:
         """Deterministic non-reversible SHA-256 hash of credentials for RAM session pooling."""
@@ -101,25 +103,32 @@ def _load_or_derive_master_key() -> bytes:
                 return bytes.fromhex(env_key)
             except ValueError:
                 pass
-        return hashlib.sha256(env_key.encode("utf-8")).digest()
+        return hashlib.pbkdf2_hmac(
+            "sha256",
+            env_key.encode("utf-8"),
+            b"bursli-master-key-salt-v1",
+            100_000,
+            dklen=32,
+        )
 
-    # Check if local librus-mcp state context.key exists for deterministic local restarts
-    local_ctx_key = Path.home() / ".librus-mcp" / "state" / "context.key"
-    if local_ctx_key.exists():
-        try:
-            raw = local_ctx_key.read_text(encoding="utf-8").strip()
-            if len(raw) == 64:
-                return bytes.fromhex(raw)
-        except OSError:
-            pass
+    if not os.environ.get("K_SERVICE"):
+        # Check if local librus-mcp state context.key exists for deterministic local restarts
+        local_ctx_key = Path.home() / ".librus-mcp" / "state" / "context.key"
+        if local_ctx_key.exists():
+            try:
+                raw = local_ctx_key.read_text(encoding="utf-8").strip()
+                if len(raw) == 64:
+                    return bytes.fromhex(raw)
+            except OSError:
+                pass
 
-    # Fallback deterministic machine-local key or ephemeral random key
-    seed_file = Path.home() / ".config" / "librus-mcp" / "config.json"
-    if seed_file.exists():
-        try:
-            return hashlib.sha256(seed_file.read_bytes() + b":librus-family-hub-v1").digest()
-        except OSError:
-            pass
+        # Fallback deterministic machine-local key or ephemeral random key
+        seed_file = Path.home() / ".config" / "librus-mcp" / "config.json"
+        if seed_file.exists():
+            try:
+                return hashlib.sha256(seed_file.read_bytes() + b":librus-family-hub-v1").digest()
+            except OSError:
+                pass
 
     logger.warning(
         "LIBRUS_MASTER_KEY not set; generating an ephemeral process master key."
@@ -152,8 +161,13 @@ class TokenVault:
         alert_email: str | None = None,
         whatsapp_webhook: str | None = None,
         ttl_seconds: int = DEFAULT_TOKEN_TTL_SECONDS,
+        scope: str = "full",
     ) -> str:
         """Encrypt account credentials into a compact URL-safe token."""
+        clean_scope = (scope or "full").strip().lower()
+        if clean_scope not in VALID_TOKEN_SCOPES:
+            raise TokenValidationError(f"Nieprawidłowy zakres uprawnień tokenu: {scope}")
+
         normalized_accounts: list[dict[str, str]] = []
         seen_aliases: set[str] = set()
         for item in accounts:
@@ -191,11 +205,12 @@ class TokenVault:
             raise TokenValidationError("Wymagane jest co najmniej jedno konto Librus.")
 
         now = int(time.time())
-        payload = {
+        payload: dict[str, Any] = {
             "v": 1,
             "iat": now,
             "exp": now + int(ttl_seconds),
             "acc": normalized_accounts,
+            "sc": clean_scope,
         }
         if alert_email:
             payload["em"] = alert_email.strip()
@@ -212,7 +227,12 @@ class TokenVault:
         ciphertext = self._aesgcm.encrypt(nonce, compressed, b"librus-family-hub:v1")
         return TOKEN_PREFIX + _b64u_encode(nonce + ciphertext)
 
-    def unseal_vault(self, token: str) -> UnsealedVaultPayload:
+    def unseal_vault(
+        self,
+        token: str,
+        *,
+        allowed_scopes: tuple[str, ...] | None = None,
+    ) -> UnsealedVaultPayload:
         """Decrypt and validate a sealed token in RAM."""
         if not token or not isinstance(token, str):
             raise TokenValidationError("Brak tokenu autoryzacyjnego.")
@@ -243,6 +263,14 @@ class TokenVault:
         if exp and now > exp:
             raise TokenValidationError("Token autoryzacyjny wygasł. Wygeneruj nowy link w aplikacji.")
 
+        raw_scope = str(data.get("sc") or "full").strip().lower()
+        if raw_scope not in VALID_TOKEN_SCOPES:
+            raw_scope = "full"
+        if allowed_scopes is not None and raw_scope not in allowed_scopes:
+            raise TokenValidationError(
+                f"Ten token ({raw_scope}) służy wyłącznie do subskrypcji lub odczytu i nie pozwala na wykonanie tej operacji."
+            )
+
         raw_accounts = data.get("acc") or []
         accounts = tuple(
             SealedAccount(
@@ -265,16 +293,24 @@ class TokenVault:
             whatsapp_webhook=data.get("wa"),
             issued_at=int(data.get("iat") or now),
             expires_at=exp,
+            scope=raw_scope,
         )
 
-    def seal_reply_confirmation(self, data: dict[str, Any]) -> str:
+    def seal_reply_confirmation(
+        self,
+        data: dict[str, Any],
+        *,
+        vault_fingerprint: str | None = None,
+    ) -> str:
         """Seal a short-lived 5-minute confirmation token for 2-step message sending."""
         now = int(time.time())
-        envelope = {
+        envelope: dict[str, Any] = {
             "iat": now,
             "exp": now + REPLY_TOKEN_TTL_SECONDS,
             "d": data,
         }
+        if vault_fingerprint:
+            envelope["fp"] = vault_fingerprint
         raw = zlib.compress(
             json.dumps(envelope, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         )
@@ -282,7 +318,12 @@ class TokenVault:
         ct = self._aesgcm.encrypt(nonce, raw, b"librus-reply-confirm:v1")
         return REPLY_PREFIX + _b64u_encode(nonce + ct)
 
-    def unseal_reply_confirmation(self, token: str) -> dict[str, Any]:
+    def unseal_reply_confirmation(
+        self,
+        token: str,
+        *,
+        expected_fingerprint: str | None = None,
+    ) -> dict[str, Any]:
         """Unseal and verify a 2-step message send confirmation token."""
         if not token or not token.startswith(REPLY_PREFIX):
             raise TokenValidationError("Nieprawidłowy token potwierdzenia wysyłki.")
@@ -301,6 +342,11 @@ class TokenVault:
         if int(time.time()) > int(envelope.get("exp") or 0):
             raise TokenValidationError(
                 "Token potwierdzenia wysyłki wygasł (ważny 5 minut). Wygeneruj podgląd ponownie."
+            )
+        token_fp = envelope.get("fp")
+        if expected_fingerprint and token_fp and not secrets.compare_digest(str(token_fp), str(expected_fingerprint)):
+            raise TokenValidationError(
+                "Token potwierdzenia wysyłki został wygenerowany dla innego konta."
             )
         return dict(envelope.get("d") or {})
 

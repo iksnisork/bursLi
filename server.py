@@ -15,6 +15,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import socket
 import time
 from datetime import date, datetime, timedelta
@@ -56,6 +57,23 @@ DEFAULT_CONFIG_PATH = Path(
     )
 )
 BACKDROP_APP_IDS = {None, "", "E8C28D3C"}
+_SAFE_HOST_RE = re.compile(r"^[a-zA-Z0-9.-]+(?::\d{1,5})?$")
+_CSP_HEADER = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; "
+    "style-src 'self' 'unsafe-inline'; "
+    "font-src 'self' data:; "
+    "img-src 'self' data: https://www.google-analytics.com https://www.googletagmanager.com; "
+    "connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com "
+    "https://*.analytics.google.com https://www.googletagmanager.com; "
+    "frame-ancestors 'self'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
+
+def _mask_token_in_url(url: str) -> str:
+    return re.sub(r"([?&]token=)[^&]+", r"\1***", url)
 
 
 def detect_lan_ip(target_ip: str = DEFAULT_NEST_HUB_IP) -> str:
@@ -212,7 +230,7 @@ class NestHubCaster:
 
     async def cast_now(self, force: bool = True) -> dict[str, Any]:
         async with self._lock:
-            logger.info("Casting %s to Nest Hub at %s...", self.dashboard_url, self.hub_ip)
+            logger.info("Casting %s to Nest Hub at %s...", _mask_token_in_url(self.dashboard_url), self.hub_ip)
             self.last_status = await asyncio.to_thread(self._cast_blocking, force)
             return self.last_status
 
@@ -268,13 +286,24 @@ class DashboardServer:
         self.token_vault = token_vault or TokenVault()
 
     def _base_url(self, request: web.Request) -> str:
-        proto = request.headers.get("X-Forwarded-Proto", request.scheme)
-        host = request.headers.get("X-Forwarded-Host", request.host)
+        raw_proto = (request.headers.get("X-Forwarded-Proto") or request.scheme or "http").split(",")[0].strip().lower()
+        proto = "https" if raw_proto == "https" else "http"
+        raw_host = (request.headers.get("X-Forwarded-Host") or request.host or "localhost").split(",")[0].strip()
+        host = raw_host if _SAFE_HOST_RE.match(raw_host) else (request.host or "localhost")
         return f"{proto}://{host}"
 
     def _build_ical_links(
-        self, base_url: str, sealed_token: str, aliases: list[str]
+        self,
+        base_url: str,
+        sealed_token: str,
+        aliases: list[str],
+        vault: UnsealedVaultPayload | None = None,
     ) -> dict[str, dict[str, Any]]:
+        feed_token = (
+            self.token_vault.seal_vault(vault.accounts, scope="ical")
+            if vault is not None and vault.accounts
+            else sealed_token
+        )
         links: dict[str, dict[str, Any]] = {}
         is_lan = any(
             h in base_url
@@ -282,9 +311,9 @@ class DashboardServer:
         )
         for alias in aliases:
             safe_alias = quote(alias, safe="")
-            safe_token = quote(sealed_token, safe="")
-            tt_http = f"{base_url}/api/ical/{sealed_token}/{safe_alias}/timetable.ics"
-            ex_http = f"{base_url}/api/ical/{sealed_token}/{safe_alias}/exams.ics"
+            safe_token = quote(feed_token, safe="")
+            tt_http = f"{base_url}/api/ical/{feed_token}/{safe_alias}/timetable.ics"
+            ex_http = f"{base_url}/api/ical/{feed_token}/{safe_alias}/exams.ics"
             tt_direct_dl = f"{base_url}/api/ical/download?account={safe_alias}&feed=timetable&token={safe_token}"
             ex_direct_dl = f"{base_url}/api/ical/download?account={safe_alias}&feed=exams&token={safe_token}"
             webcal_tt = tt_http.replace("https://", "webcal://").replace("http://", "webcal://")
@@ -308,6 +337,8 @@ class DashboardServer:
         self, payload: UnsealedVaultPayload
     ) -> UnsealedVaultPayload:
         """Overlay any saved child credentials from student_accounts.json onto the resolved vault."""
+        if os.environ.get("K_SERVICE"):
+            return payload
         sidecar_path = self.hub.local_config_path.parent / "student_accounts.json"
         if not sidecar_path.exists():
             return payload
@@ -348,10 +379,15 @@ class DashboardServer:
             whatsapp_webhook=payload.whatsapp_webhook,
             issued_at=payload.issued_at,
             expires_at=payload.expires_at,
+            scope=payload.scope,
         )
 
     def _resolve_vault(
-        self, request: web.Request, explicit_token: str | None = None
+        self,
+        request: web.Request,
+        explicit_token: str | None = None,
+        *,
+        allowed_scopes: tuple[str, ...] = ("full", "kiosk"),
     ) -> tuple[UnsealedVaultPayload, str, str]:
         """Resolve (UnsealedVaultPayload, source_mode, active_token) from request or local home config."""
         token = (
@@ -362,7 +398,7 @@ class DashboardServer:
         if token:
             try:
                 payload = self._overlay_local_student_accounts(
-                    self.token_vault.unseal_vault(token)
+                    self.token_vault.unseal_vault(token, allowed_scopes=allowed_scopes)
                 )
                 return payload, "token", token
             except TokenValidationError:
@@ -439,7 +475,7 @@ class DashboardServer:
         try:
             vault, active_mode, sealed_token = self._resolve_vault(request)
             active_aliases = [a.alias for a in vault.accounts]
-            ical_links = self._build_ical_links(base_url, sealed_token, active_aliases)
+            ical_links = self._build_ical_links(base_url, sealed_token, active_aliases, vault=vault)
         except TokenValidationError:
             pass
 
@@ -506,8 +542,14 @@ class DashboardServer:
             profiles = await self.hub.get_profiles(vault, force=True) if verify else []
             aliases = [a.alias for a in vault.accounts]
             base_url = self._base_url(request)
-            ical_links = self._build_ical_links(base_url, token, aliases)
-            kiosk_url = f"{base_url}/?token={quote(token, safe='')}&nesthub=1"
+            ical_links = self._build_ical_links(base_url, token, aliases, vault=vault)
+            kiosk_token = self.token_vault.seal_vault(
+                vault.accounts,
+                alert_email=vault.alert_email,
+                whatsapp_webhook=vault.whatsapp_webhook,
+                scope="kiosk",
+            )
+            kiosk_url = f"{base_url}/?token={quote(kiosk_token, safe='')}&nesthub=1"
             return web.json_response(
                 {
                     "ok": True,
@@ -552,18 +594,19 @@ class DashboardServer:
                     student_username, student_password
                 )
 
-            if self.hub.local_config_path.exists():
+            if not os.environ.get("K_SERVICE") and self.hub.local_config_path.exists():
                 save_local_student_account(
                     self.hub.local_config_path,
                     alias,
                     student_username,
                     student_password,
                 )
-            await self.hub.close_all()
             vault, _, token = self._resolve_vault(request)
             profiles = await self.hub.get_profiles(vault, force=True)
             base_url = self._base_url(request)
-            ical_links = self._build_ical_links(base_url, token, [a.alias for a in vault.accounts])
+            ical_links = self._build_ical_links(
+                base_url, token, [a.alias for a in vault.accounts], vault=vault
+            )
             return web.json_response(
                 {
                     "ok": True,
@@ -587,9 +630,15 @@ class DashboardServer:
             profiles = await self.hub.get_profiles(vault, force=force)
             base_url = self._base_url(request)
             ical_links = self._build_ical_links(
-                base_url, token, [a.alias for a in vault.accounts]
+                base_url, token, [a.alias for a in vault.accounts], vault=vault
             )
-            kiosk_url = f"{base_url}/?token={quote(token, safe='')}&nesthub=1"
+            kiosk_token = self.token_vault.seal_vault(
+                vault.accounts,
+                alert_email=vault.alert_email,
+                whatsapp_webhook=vault.whatsapp_webhook,
+                scope="kiosk",
+            )
+            kiosk_url = f"{base_url}/?token={quote(kiosk_token, safe='')}&nesthub=1"
             return web.json_response(
                 {
                     "profiles": profiles,
@@ -853,7 +902,7 @@ class DashboardServer:
     async def handle_reply_preview(self, request: web.Request) -> web.Response:
         """Step 1 of 2: Resolve recipient and generate a 5-minute sealed confirmation token."""
         try:
-            vault, _, _ = self._resolve_vault(request)
+            vault, _, _ = self._resolve_vault(request, allowed_scopes=("full",))
             body = await request.json()
         except TokenValidationError as exc:
             return web.json_response({"error": str(exc), "code": "VAULT_EMPTY"}, status=401)
@@ -883,7 +932,9 @@ class DashboardServer:
                 "body": reply_body,
                 "recipient": resolved["recipient"],
             }
-            confirmation_token = self.token_vault.seal_reply_confirmation(confirm_payload)
+            confirmation_token = self.token_vault.seal_reply_confirmation(
+                confirm_payload, vault_fingerprint=vault.fingerprint()
+            )
             return web.json_response(
                 {
                     "ok": True,
@@ -902,7 +953,7 @@ class DashboardServer:
     async def handle_reply_send(self, request: web.Request) -> web.Response:
         """Step 2 of 2: Redeem a 5-minute confirmation token and dispatch the reply."""
         try:
-            vault, _, _ = self._resolve_vault(request)
+            vault, _, _ = self._resolve_vault(request, allowed_scopes=("full",))
             body = await request.json()
         except TokenValidationError as exc:
             return web.json_response({"error": str(exc), "code": "VAULT_EMPTY"}, status=401)
@@ -914,7 +965,9 @@ class DashboardServer:
             return web.json_response({"error": "Brak tokenu potwierdzenia wysyłki."}, status=400)
 
         try:
-            confirm_data = self.token_vault.unseal_reply_confirmation(confirmation_token)
+            confirm_data = self.token_vault.unseal_reply_confirmation(
+                confirmation_token, expected_fingerprint=vault.fingerprint()
+            )
             outcome = await self.hub.execute_confirmed_reply(vault, confirm_data)
             return web.json_response({"ok": True, **outcome})
         except Exception as exc:
@@ -963,7 +1016,7 @@ class DashboardServer:
         }
 
     async def _generate_ical_response(
-        self, vault: VaultPayload, alias: str, feed: str, force_download: bool = False
+        self, vault: UnsealedVaultPayload, alias: str, feed: str, force_download: bool = False
     ) -> web.Response:
         if not any(a.alias == alias for a in vault.accounts):
             if vault.accounts:
@@ -1028,10 +1081,14 @@ class DashboardServer:
         feed = request.match_info.get("feed", "").strip()
 
         try:
-            vault = self._overlay_local_student_accounts(self.token_vault.unseal_vault(token))
+            vault = self._overlay_local_student_accounts(
+                self.token_vault.unseal_vault(token, allowed_scopes=("full", "kiosk", "ical"))
+            )
         except TokenValidationError as exc:
             with contextlib.suppress(Exception):
-                vault, _, _ = self._resolve_vault(request)
+                vault, _, _ = self._resolve_vault(
+                    request, allowed_scopes=("full", "kiosk", "ical")
+                )
             if not locals().get("vault"):
                 return web.Response(text=f"Invalid token: {exc}", status=401)
 
@@ -1041,7 +1098,9 @@ class DashboardServer:
     async def handle_ical_download(self, request: web.Request) -> web.Response:
         """Direct iCalendar (.ics) download/feed using active session or local config (no JWE token required in URL)."""
         try:
-            vault, _, _ = self._resolve_vault(request)
+            vault, _, _ = self._resolve_vault(
+                request, allowed_scopes=("full", "kiosk", "ical")
+            )
         except TokenValidationError as exc:
             return web.Response(text=f"Vault error: {exc}", status=401)
 
@@ -1152,6 +1211,15 @@ class DashboardServer:
             return web.json_response({"ok": False, "error": str(exc)}, status=502)
 
     async def handle_cast(self, request: web.Request) -> web.Response:
+        if os.environ.get("K_SERVICE"):
+            return web.json_response(
+                {
+                    **self.caster.last_status,
+                    "connected": False,
+                    "error": "Funkcja bezpośredniego castowania LAN (pychromecast) jest dostępna tylko na serwerze domowym.",
+                },
+                status=403,
+            )
         action = "cast"
         if request.can_read_body:
             with contextlib.suppress(Exception):
@@ -1180,13 +1248,21 @@ def create_app(
         request: web.Request,
         handler: Any,
     ) -> web.StreamResponse:
-        host = request.headers.get("X-Forwarded-Host") or request.host or ""
+        raw_host = (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip()
+        host = raw_host if _SAFE_HOST_RE.match(raw_host) else (request.host or "")
         if host.lower().startswith("www."):
             bare_host = host[4:]
-            proto = request.headers.get("X-Forwarded-Proto") or request.scheme or "https"
-            target_url = f"{proto}://{bare_host}{request.rel_url}"
-            raise web.HTTPMovedPermanently(location=target_url)
-        return await handler(request)
+            if _SAFE_HOST_RE.match(bare_host):
+                raw_proto = (request.headers.get("X-Forwarded-Proto") or request.scheme or "https").split(",")[0].strip().lower()
+                proto = "https" if raw_proto == "https" else "http"
+                target_url = f"{proto}://{bare_host}{request.rel_url}"
+                raise web.HTTPMovedPermanently(location=target_url)
+        response = await handler(request)
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        response.headers.setdefault("Content-Security-Policy", _CSP_HEADER)
+        return response
 
     app = web.Application(middlewares=[canonical_host_middleware])
 

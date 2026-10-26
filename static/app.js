@@ -107,7 +107,20 @@ function escapeHtml(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeHttpUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl ?? "").trim(), window.location.origin);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.href;
+    }
+  } catch (_e) {
+    // ignore invalid URL
+  }
+  return "#";
 }
 
 function showToast(msg, duration = 3800) {
@@ -377,7 +390,7 @@ function renderTimetableModule() {
     pill.className = `day-pill ${isActiveDay ? "active" : ""} ${isToday ? "is-today" : ""}`;
     pill.innerHTML = `
       <span class="day-name">${escapeHtml(day.day_name)}</span>
-      <span class="day-date">${formatShortDate(day.date)} · ${day.lessons.length} LEK.</span>
+      <span class="day-date">${escapeHtml(formatShortDate(day.date))} · ${day.lessons.length} LEK.</span>
     `;
     pill.onclick = () => {
       state.selectedDayIndex = idx;
@@ -404,7 +417,7 @@ function renderTimetableDayView(dayObj, todayIso) {
     els.contentArea.innerHTML = `
       <div class="empty-day-card">
         <h2>Brak zaplanowanych lekcji w tym dniu</h2>
-        <p>${dayObj ? `${escapeHtml(dayObj.day_name)}, ${formatShortDate(dayObj.date)}` : ""}</p>
+        <p>${dayObj ? `${escapeHtml(dayObj.day_name)}, ${escapeHtml(formatShortDate(dayObj.date))}` : ""}</p>
       </div>
     `;
     return;
@@ -492,7 +505,7 @@ function renderTimetableWeekView(days, todayIso) {
     col.innerHTML = `
       <div class="week-col-header" style="cursor:pointer" data-idx="${idx}">
         <h3>${escapeHtml(d.day_name)}</h3>
-        <span>${formatShortDate(d.date)}</span>
+        <span>${escapeHtml(formatShortDate(d.date))}</span>
       </div>
       <div class="week-col-lessons">${lessonsHtml}</div>
     `;
@@ -1472,7 +1485,7 @@ function openActionItemModal(item) {
 
   const links = item.links || [];
   const linksHtml = links.length > 0
-    ? `<div class="chip-row" style="margin-bottom:8px;">${links.map((l) => `<a href="${escapeHtml(l)}" target="_blank" rel="noopener" class="btn-outline btn-xs">OTWÓRZ LINK ↗</a>`).join("")}</div>`
+    ? `<div class="chip-row" style="margin-bottom:8px;">${links.map((l) => `<a href="${escapeHtml(sanitizeHttpUrl(l))}" target="_blank" rel="noopener noreferrer" class="btn-outline btn-xs">OTWÓRZ LINK ↗</a>`).join("")}</div>`
     : "";
 
   els.messageModalBody.innerHTML = `
@@ -1624,7 +1637,7 @@ function renderGradesModule() {
       : visibleGrades.map((g) => {
           const rawG = g.grade || g.value;
           const isRecent = matchesGradeWindow(g);
-          return `<span class="grade-pill ${getGradeClass(rawG)} ${isRecent ? "is-recent" : ""}" title="${isRecent ? "[NOWA OCENA] " : ""}${escapeHtml(g.category || "")} | Waga: ${g.weight ?? "-"} | Data: ${escapeHtml(g.day || "")} | ${escapeHtml(g.comment || "")}">${escapeHtml(rawG)}</span>`;
+          return `<span class="grade-pill ${getGradeClass(rawG)} ${isRecent ? "is-recent" : ""}" title="${isRecent ? "[NOWA OCENA] " : ""}${escapeHtml(g.category || "")} | Waga: ${escapeHtml(g.weight ?? "-")} | Data: ${escapeHtml(g.day || "")} | ${escapeHtml(g.comment || "")}">${escapeHtml(rawG)}</span>`;
         }).join(" ");
 
     return `
@@ -1688,12 +1701,12 @@ function renderGradesModule() {
   wrapper.innerHTML = `
     <div class="stats-banner">
       <div class="stat-tile">
-        <span class="stat-value" style="color:var(--accent-emerald)">${overallFreq.percentage != null ? `${overallFreq.percentage}%` : "---"}</span>
-        <span class="stat-label">Frekwencja ogólna (${overallFreq.attended ?? 0}/${overallFreq.total ?? 0})</span>
+        <span class="stat-value" style="color:var(--accent-emerald)">${overallFreq.percentage != null ? `${escapeHtml(overallFreq.percentage)}%` : "---"}</span>
+        <span class="stat-label">Frekwencja ogólna (${escapeHtml(overallFreq.attended ?? 0)}/${escapeHtml(overallFreq.total ?? 0)})</span>
       </div>
       <div class="stat-tile">
-        <span class="stat-value">${sem1Freq.percentage != null ? `${sem1Freq.percentage}%` : "---"}</span>
-        <span class="stat-label">I Semestr (${sem1Freq.attended ?? 0}/${sem1Freq.total ?? 0})</span>
+        <span class="stat-value">${sem1Freq.percentage != null ? `${escapeHtml(sem1Freq.percentage)}%` : "---"}</span>
+        <span class="stat-label">I Semestr (${escapeHtml(sem1Freq.attended ?? 0)}/${escapeHtml(sem1Freq.total ?? 0)})</span>
       </div>
       <div class="stat-tile">
         <span class="stat-value" style="color:var(--accent-primary)">${recentGrades.filter((g) => matchesGradeWindow(g)).length}</span>
@@ -2288,7 +2301,9 @@ async function renderVaultAndCalendarModule() {
 
   const icsRowsHtml = [];
   Object.entries(activeLinks).forEach(([alias, f]) => {
-    const gcalAddByUrl = f.gcal_add_by_url_page || "https://calendar.google.com/calendar/u/0/r/settings/addbyurl";
+    const gcalAddByUrl = sanitizeHttpUrl(
+      f.gcal_add_by_url_page || "https://calendar.google.com/calendar/u/0/r/settings/addbyurl"
+    );
     icsRowsHtml.push(`
       <tr>
         <td style="width:105px;"><span class="cell-primary">${escapeHtml(alias.toUpperCase())}</span></td>
@@ -2298,7 +2313,7 @@ async function renderVaultAndCalendarModule() {
         </td>
         <td style="width:320px;text-align:right;white-space:nowrap;">
           <button class="btn-primary btn-xs copy-url-btn" data-url="${escapeHtml(f.timetable_ics)}" type="button">1. Kopiuj URL subskrypcji</button>
-          <a class="btn-outline btn-xs" href="${escapeHtml(gcalAddByUrl)}" target="_blank" rel="noopener" style="margin-left:4px;">2. Dodaj z URL w Google Cal ↗</a>
+          <a class="btn-outline btn-xs" href="${escapeHtml(gcalAddByUrl)}" target="_blank" rel="noopener noreferrer" style="margin-left:4px;">2. Dodaj z URL w Google Cal ↗</a>
         </td>
       </tr>
       <tr>
@@ -2309,7 +2324,7 @@ async function renderVaultAndCalendarModule() {
         </td>
         <td style="width:320px;text-align:right;white-space:nowrap;">
           <button class="btn-primary btn-xs copy-url-btn" data-url="${escapeHtml(f.exams_ics)}" type="button">1. Kopiuj URL subskrypcji</button>
-          <a class="btn-outline btn-xs" href="${escapeHtml(gcalAddByUrl)}" target="_blank" rel="noopener" style="margin-left:4px;">2. Dodaj z URL w Google Cal ↗</a>
+          <a class="btn-outline btn-xs" href="${escapeHtml(gcalAddByUrl)}" target="_blank" rel="noopener noreferrer" style="margin-left:4px;">2. Dodaj z URL w Google Cal ↗</a>
         </td>
       </tr>
     `);

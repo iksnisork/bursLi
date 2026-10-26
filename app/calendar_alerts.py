@@ -5,12 +5,15 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import html
+import ipaddress
 import logging
 import os
 import smtplib
+import socket
 from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 from typing import Any
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -361,6 +364,7 @@ async def sync_events_to_google_calendar_oauth(
     if not access_token:
         raise ValueError("Brak tokenu OAuth2 dla Google Calendar.")
     cal_id = (calendar_id or "primary").strip()
+    safe_cal_id = quote(cal_id, safe="")
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
@@ -417,10 +421,10 @@ async def sync_events_to_google_calendar_oauth(
                 },
             }
 
-            put_url = f"https://www.googleapis.com/calendar/v3/calendars/{cal_id}/events/{deterministic_id}"
+            put_url = f"https://www.googleapis.com/calendar/v3/calendars/{safe_cal_id}/events/{deterministic_id}"
             resp = await client.put(put_url, headers=headers, json=body)
             if resp.status_code == 404:
-                post_url = f"https://www.googleapis.com/calendar/v3/calendars/{cal_id}/events"
+                post_url = f"https://www.googleapis.com/calendar/v3/calendars/{safe_cal_id}/events"
                 resp = await client.post(post_url, headers=headers, json=body)
 
             if resp.status_code in (200, 201):
@@ -589,6 +593,42 @@ def format_email_digest_html(
     return subject, "\n".join(plain_lines), "\n".join(html_parts)
 
 
+def _validate_public_https_webhook(url: str) -> str:
+    """Validate that a webhook URL uses HTTPS and resolves exclusively to public global IP addresses (anti-SSRF)."""
+    clean = (url or "").strip()
+    parsed = urlsplit(clean)
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        raise ValueError("Webhook musi używać protokołu HTTPS oraz prawidłowej nazwy hosta.")
+    host = parsed.hostname.lower().strip(".")
+    if (
+        host in ("localhost", "metadata.google.internal", "metadata", "169.254.169.254")
+        or host.endswith((".internal", ".local", ".localhost", ".lan"))
+    ):
+        raise ValueError("Niedozwolony host wewnętrzny w adresie webhooka.")
+
+    try:
+        addr_infos = socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ValueError(f"Nie można rozwiązać nazwy hosta webhooka ({host}).") from exc
+
+    if not addr_infos:
+        raise ValueError(f"Brak adresów IP dla hosta webhooka ({host}).")
+
+    for info in addr_infos:
+        ip_str = info[4][0]
+        ip_obj = ipaddress.ip_address(ip_str)
+        if (
+            not ip_obj.is_global
+            or ip_obj.is_private
+            or ip_obj.is_loopback
+            or ip_obj.is_link_local
+            or ip_obj.is_multicast
+            or ip_obj.is_reserved
+        ):
+            raise ValueError("Adres webhooka wskazuje na prywatną lub wewnętrzną sieć (zablokowano SSRF).")
+    return clean
+
+
 async def dispatch_digest_notifications(
     recipient_email: str | None,
     whatsapp_webhook: str | None,
@@ -642,9 +682,10 @@ async def dispatch_digest_notifications(
             delivery_status["email"] = "preview_only (ustaw RESEND_API_KEY lub SMTP_HOST na Cloud Run)"
 
     if whatsapp_webhook:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        validated_webhook = _validate_public_https_webhook(whatsapp_webhook)
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
             resp = await client.post(
-                whatsapp_webhook,
+                validated_webhook,
                 json={"text": f"*{subject}*\n\n{plain_text[:3500]}"},
             )
             delivery_status["whatsapp"] = (

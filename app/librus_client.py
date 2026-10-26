@@ -65,6 +65,9 @@ logger = logging.getLogger("librus-hub.client")
 
 SESSION_TTL_SECONDS = 15 * 60  # Keep authenticated HTTP session in RAM for 15 min
 DATA_CACHE_TTL_SECONDS = 5 * 60
+MAX_POOL_SIZE = 64
+MAX_DOCX_XML_UNCOMPRESSED_BYTES = 10 * 1024 * 1024  # 10 MB anti-Zip-Bomb limit
+MAX_ATTACHMENT_PARSE_BYTES = 15 * 1024 * 1024       # 15 MB max raw attachment size
 
 _ROOM_RE = re.compile(r"^(?P<head>.*?)\s+s\.\s*(?P<room>.+?)\s*$")
 _GROUP_RE = re.compile(r"^(?P<teacher>.*?)\s*\((?P<group>[^()]+)\)\s*$")
@@ -132,6 +135,8 @@ def summarize_change(change_label: str, meta_pairs: list[list[str]] | tuple[tupl
 
 def load_local_config_vault(config_path: Path) -> UnsealedVaultPayload | None:
     """Load local `~/.config/librus-mcp/config.json` (plus optional `student_accounts.json`) for home mode."""
+    if os.environ.get("K_SERVICE"):
+        return None
     if not config_path.exists():
         return None
     try:
@@ -184,6 +189,8 @@ def save_local_student_account(
     student_password: str,
 ) -> None:
     """Save or remove a paired child/student Librus account in `~/.config/librus-mcp/student_accounts.json`."""
+    if os.environ.get("K_SERVICE"):
+        return
     sidecar_path = config_path.parent / "student_accounts.json"
     data: dict[str, dict[str, str]] = {}
     if sidecar_path.exists():
@@ -199,10 +206,14 @@ def save_local_student_account(
         data.pop(clean_alias, None)
     sidecar_path.parent.mkdir(parents=True, exist_ok=True)
     sidecar_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    with contextlib.suppress(OSError):
+        os.chmod(sidecar_path, 0o600)
 
 
 def extract_text_from_bytes(filename: str, content_type: str | None, data: bytes) -> str | None:
     """Extract human-readable text in RAM from PDF, DOCX, TXT, CSV, or MD attachments."""
+    if not data or len(data) > MAX_ATTACHMENT_PARSE_BYTES:
+        return None
     fname_low = (filename or "").lower()
     ctype_low = (content_type or "").lower()
 
@@ -221,7 +232,19 @@ def extract_text_from_bytes(filename: str, content_type: str | None, data: bytes
         if fname_low.endswith(".docx") or "wordprocessingml" in ctype_low:
             with zipfile.ZipFile(io.BytesIO(data)) as zf:
                 if "word/document.xml" in zf.namelist():
+                    info = zf.getinfo("word/document.xml")
+                    if info.file_size > MAX_DOCX_XML_UNCOMPRESSED_BYTES:
+                        logger.warning(
+                            "Refusing to decompress oversized word/document.xml (%d bytes) in %s",
+                            info.file_size,
+                            filename,
+                        )
+                        return None
                     xml_bytes = zf.read("word/document.xml")
+                    xml_head_upper = xml_bytes[:4096].upper()
+                    if b"<!ENTITY" in xml_head_upper or b"<!DOCTYPE" in xml_head_upper:
+                        logger.warning("Rejected DOCX XML with DOCTYPE/ENTITY declarations in %s", filename)
+                        return None
                     root = ET.fromstring(xml_bytes)
                     ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
                     paragraphs: list[str] = []
@@ -335,6 +358,12 @@ class StatelessLibrusHub:
                             self._reset_client_session(existing.service.account(acc_key), full=True)
                 return existing
 
+            if len(self._pool) >= MAX_POOL_SIZE:
+                lru_key = min(self._pool.items(), key=lambda kv: kv[1].last_used_at)[0]
+                evicted = self._pool.pop(lru_key, None)
+                if evicted is not None:
+                    asyncio.create_task(self._safe_close_service(evicted.service))
+
             creds_map: dict[str, AccountCredentials] = {}
             backends: dict[str, MessagingBackend] = {}
             for acc in vault.accounts:
@@ -401,8 +430,8 @@ class StatelessLibrusHub:
         p = student_password or ""
         if not u or not p:
             return {"verified": False}
-        # In demo/mock mode or when demo accounts are active, accept without live Librus network call
-        if getattr(self, "_demo_mode", False) or u.lower().startswith("demo"):
+        # In demo/mock mode, accept without live Librus network call
+        if getattr(self, "_demo_mode", False):
             return {"verified": True, "student_name": u}
         creds_map = {
             "student_verify": AccountCredentials(
@@ -424,9 +453,9 @@ class StatelessLibrusHub:
                 "class_name": class_name,
             }
         except Exception as exc:
-            logger.warning("Student account verification failed for %s: %s", u, exc)
+            logger.warning("Student account verification failed: %s", type(exc).__name__)
             raise ValueError(
-                f"Nie udało się zalogować na konto ucznia ({u}). Sprawdź login ucznia (zwykle bez litery 'u' na końcu) oraz hasło."
+                "Nie udało się zalogować na konto ucznia. Sprawdź login ucznia (zwykle bez litery 'u' na końcu) oraz hasło."
             ) from exc
         finally:
             await self._safe_close_service(service)

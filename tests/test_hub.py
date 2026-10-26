@@ -11,6 +11,7 @@ from aiohttp.test_utils import TestClient, TestServer
 import pytest
 
 from app.calendar_alerts import (
+    _validate_public_https_webhook,
     build_proactive_alerts,
     format_email_digest_html,
     format_study_card_description,
@@ -442,3 +443,85 @@ async def test_http_server_status_and_vault_seal_endpoints(tmp_path: Path) -> No
         assert seal_json["ical_links"]["ola"]["exams_gcal_add"].startswith(
             "https://calendar.google.com/calendar/r?cid="
         )
+
+        # 4. Security headers and token scope enforcement
+        assert resp_idx.headers.get("Referrer-Policy") == "no-referrer"
+        assert resp_idx.headers.get("X-Content-Type-Options") == "nosniff"
+        assert resp_idx.headers.get("X-Frame-Options") == "SAMEORIGIN"
+        assert "googletagmanager.com" in (resp_idx.headers.get("Content-Security-Policy") or "")
+
+        # Extract the ical-scoped token from the generated .ics URL and verify it cannot be used for replies
+        tt_url = seal_json["ical_links"]["ola"]["timetable_ics"]
+        ical_tok = tt_url.split("/api/ical/")[1].split("/")[0]
+        unsealed_ical = token_vault.unseal_vault(ical_tok, allowed_scopes=("ical",))
+        assert unsealed_ical.scope == "ical"
+
+        resp_reply_forbidden = await client.post(
+            "/api/messages/reply-preview",
+            headers={"X-Librus-Token": ical_tok},
+            json={"account": "ola", "message_id": "123", "body": "Test"},
+        )
+        assert resp_reply_forbidden.status == 401
+
+
+def test_scoped_tokens_and_reply_fingerprint_binding() -> None:
+    vault = TokenVault(master_key=b"fedcba9876543210fedcba9876543210")
+    accounts = [{"alias": "ola", "username": "1101135u", "password": "pw1"}]
+
+    ical_token = vault.seal_vault(accounts, scope="ical")
+    kiosk_token = vault.seal_vault(accounts, scope="kiosk")
+    full_token = vault.seal_vault(accounts, scope="full")
+
+    # ical token rejected when only full or kiosk scopes are allowed
+    with pytest.raises(TokenValidationError, match="wyłącznie do subskrypcji lub odczytu"):
+        vault.unseal_vault(ical_token, allowed_scopes=("full", "kiosk"))
+
+    # kiosk token allowed for read-only dashboard ("full", "kiosk"), rejected for ("full",)
+    assert vault.unseal_vault(kiosk_token, allowed_scopes=("full", "kiosk")).scope == "kiosk"
+    with pytest.raises(TokenValidationError, match="wyłącznie do subskrypcji lub odczytu"):
+        vault.unseal_vault(kiosk_token, allowed_scopes=("full",))
+
+    # Reply confirmation bound to vault fingerprint
+    fp1 = vault.unseal_vault(full_token).fingerprint()
+    reply_tok = vault.seal_reply_confirmation(
+        {"alias": "ola", "message_id": "99", "body": "OK"},
+        vault_fingerprint=fp1,
+    )
+    assert vault.unseal_reply_confirmation(reply_tok, expected_fingerprint=fp1)["message_id"] == "99"
+    with pytest.raises(TokenValidationError, match="innego konta"):
+        vault.unseal_reply_confirmation(reply_tok, expected_fingerprint="different-fingerprint")
+
+
+def test_ssrf_webhook_validation_and_docx_xxe_rejection() -> None:
+    # 1. SSRF webhook validation blocks non-HTTPS, localhost, metadata IP, and private IPs
+    for unsafe_url in (
+        "http://example.com/webhook",
+        "https://localhost/webhook",
+        "https://127.0.0.1/webhook",
+        "https://169.254.169.254/computeMetadata/v1/",
+        "https://192.168.1.10/hook",
+        "https://10.0.0.1/hook",
+        "https://metadata.google.internal/computeMetadata/v1/",
+    ):
+        with pytest.raises(ValueError):
+            _validate_public_https_webhook(unsafe_url)
+
+    # 2. DOCX parser rejects XML with <!DOCTYPE / <!ENTITY (XXE defense)
+    xxe_buf = io.BytesIO()
+    xxe_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<!DOCTYPE foo [ <!ENTITY xxe SYSTEM "file:///etc/passwd"> ]>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:body><w:p><w:r><w:t>&xxe;</w:t></w:r></w:p></w:body></w:document>"
+    )
+    with zipfile.ZipFile(xxe_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("word/document.xml", xxe_xml.encode("utf-8"))
+
+    assert (
+        extract_text_from_bytes(
+            "evil.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            xxe_buf.getvalue(),
+        )
+        is None
+    )
