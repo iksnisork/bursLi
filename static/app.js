@@ -2494,12 +2494,8 @@ async function renderVaultAndCalendarModule() {
         <select id="studentPairProfileSelect" class="pi-select" style="min-width:210px;">
           ${profileSelectOptions}
         </select>
-        <select id="studentPairRoleSelect" class="pi-select" style="min-width:195px;">
-          <option id="pairOptStudent" value="student" ${initialPairRole === "student" ? "selected" : ""}>Połącz konto dziecka (z „u”)</option>
-          <option id="pairOptParent" value="parent" ${initialPairRole === "parent" ? "selected" : ""}>Połącz konto rodzica (bez „u”)</option>
-        </select>
-        <input id="studentPairLoginInput" class="input-field" style="max-width:195px;" placeholder="Login" value="" />
-        <input id="studentPairPasswordInput" type="password" class="input-field" style="max-width:180px;" placeholder="Hasło do Librusa" />
+        <input id="studentPairLoginInput" class="input-field" style="max-width:175px;" placeholder="Login" value="" />
+        <input id="studentPairPasswordInput" type="password" class="input-field" style="max-width:170px;" placeholder="Hasło do Librusa" />
         <button id="saveStudentPairBtn" class="btn-primary btn-xs" type="button">+ Połącz konto</button>
         <span id="studentPairStatusMsg" class="card-subtitle" style="margin-left:auto;"></span>
       </div>
@@ -2653,49 +2649,28 @@ async function renderVaultAndCalendarModule() {
     showToast("Przeniesiono dane logowania do pól konta rodzica.");
   };
 
-  // Step 2: Dynamic Pairing Bar (only for incomplete profiles; locks already-connected role)
+  // Step 2: Dynamic Pairing Bar (automatically detects whether the selected profile is missing Child or Parent)
   const pairSelect = document.getElementById("studentPairProfileSelect");
-  const pairRoleSelect = document.getElementById("studentPairRoleSelect");
-  const pairOptStudent = document.getElementById("pairOptStudent");
-  const pairOptParent = document.getElementById("pairOptParent");
   const pairLoginInput = document.getElementById("studentPairLoginInput");
   const pairPasswordInput = document.getElementById("studentPairPasswordInput");
   const saveStudentPairBtn = document.getElementById("saveStudentPairBtn");
   const pairStatusMsg = document.getElementById("studentPairStatusMsg");
 
-  const syncPairBarUi = (updateRoleFromProfile = false) => {
-    if (!pairSelect || !pairRoleSelect || !pairLoginInput || !saveStudentPairBtn) return;
+  const getSelectedPairRole = () => {
+    if (!pairSelect) return "student";
     const opt = pairSelect.options[pairSelect.selectedIndex];
     const hasParent = opt ? opt.getAttribute("data-has-parent") === "1" : true;
     const hasChild = opt ? opt.getAttribute("data-has-child") === "1" : false;
-    const existingParentLogin = (opt && opt.getAttribute("data-parent-login")) || "";
-    const existingStudentLogin = (opt && opt.getAttribute("data-student-login")) || "";
+    return !hasParent && hasChild ? "parent" : "student";
+  };
+
+  const syncPairBarUi = () => {
+    if (!pairSelect || !pairLoginInput || !saveStudentPairBtn) return;
+    const opt = pairSelect.options[pairSelect.selectedIndex];
     const suggestedStudent = (opt && opt.getAttribute("data-suggested-student")) || "";
     const suggestedParent = (opt && opt.getAttribute("data-suggested-parent")) || "";
+    const role = getSelectedPairRole();
 
-    // Mark already-connected role as disabled so the system never suggests re-adding it
-    if (pairOptStudent) {
-      pairOptStudent.disabled = hasChild;
-      pairOptStudent.textContent = hasChild
-        ? `Konto dziecka (✓ już połączone${existingStudentLogin ? `: ${existingStudentLogin}` : ""})`
-        : "Połącz konto dziecka (z „u”)";
-    }
-    if (pairOptParent) {
-      pairOptParent.disabled = hasParent;
-      pairOptParent.textContent = hasParent
-        ? `Konto rodzica (✓ już połączone${existingParentLogin ? `: ${existingParentLogin}` : ""})`
-        : "Połącz konto rodzica (bez „u”)";
-    }
-
-    if (updateRoleFromProfile || (pairRoleSelect.value === "student" && hasChild) || (pairRoleSelect.value === "parent" && hasParent)) {
-      if (!hasParent && hasChild) {
-        pairRoleSelect.value = "parent";
-      } else {
-        pairRoleSelect.value = "student";
-      }
-    }
-
-    const role = pairRoleSelect.value;
     if (role === "parent") {
       pairLoginInput.placeholder = "Login rodzica (bez „u”, np. 8090546)";
       const existingMatch = findProfileByLogin(suggestedParent);
@@ -2719,10 +2694,9 @@ async function renderVaultAndCalendarModule() {
     }
   };
 
-  if (pairSelect && pairRoleSelect) {
-    syncPairBarUi(true);
-    pairSelect.onchange = () => syncPairBarUi(true);
-    pairRoleSelect.onchange = () => syncPairBarUi(false);
+  if (pairSelect) {
+    syncPairBarUi();
+    pairSelect.onchange = () => syncPairBarUi();
   }
 
   if (pairLoginInput && pairStatusMsg) {
@@ -2733,7 +2707,7 @@ async function renderVaultAndCalendarModule() {
         pairStatusMsg.style.color = "var(--accent-rose)";
         pairStatusMsg.textContent = `Konto „${typed}” jest już połączone z profilem ${dup.displayName}!`;
       } else {
-        const role = pairRoleSelect ? pairRoleSelect.value : "student";
+        const role = getSelectedPairRole();
         pairStatusMsg.style.color = "var(--text-secondary)";
         pairStatusMsg.textContent =
           role === "parent"
@@ -2750,7 +2724,7 @@ async function renderVaultAndCalendarModule() {
         (defaultPairProfile && defaultPairProfile.alias) ||
         state.activeAccount ||
         "";
-      const role = pairRoleSelect ? pairRoleSelect.value : "student";
+      const role = getSelectedPairRole();
       const enteredLogin = pairLoginInput ? pairLoginInput.value.trim() : "";
       const enteredPassword = pairPasswordInput ? pairPasswordInput.value : "";
 

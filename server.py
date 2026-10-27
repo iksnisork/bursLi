@@ -1327,7 +1327,7 @@ async def async_main(args: argparse.Namespace) -> None:
     )
     app = create_app(hub, caster, static_dir)
 
-    runner = web.AppRunner(app)
+    runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, host=args.host, port=args.port)
     await site.start()
