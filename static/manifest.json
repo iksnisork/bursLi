@@ -1,7 +1,7 @@
 {
   "name": "bursLi",
   "short_name": "bursLi",
-  "description": "Bezstanowy rodzinny hub Librus Synergia: Plan lekcji, Sprawdziany + Zakres materiału, Zadania, Oceny, Wiadomości i Kalendarz Google.",
+  "description": "Alternatywny klient systemu Librus Synergia - darmowy, oparty o otwarty kod źródłowy (open-source), nieskomplikowany i użyteczny: szybkie spojrzenie na plan lekcji, wymagania do sprawdzianów i kartkówek, przypomnienia o zadaniach, podgląd ocen i wiadomości oraz synchronizacja z Google Calendar, Apple Calendar i innymi przez format .ics.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#14191f",
