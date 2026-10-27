@@ -2365,7 +2365,7 @@ async function renderVaultAndCalendarModule() {
 
       if (p.isLocal) {
         const fixPassBtn = p.authError
-          ? `<button class="btn-primary btn-xs edit-acc-btn" data-alias="${escapeHtml(p.alias)}" type="button" style="background:var(--accent-rose);border-color:var(--accent-rose);">Popraw hasło</button>`
+          ? `<button class="btn-primary btn-xs edit-acc-btn" data-alias="${escapeHtml(p.alias)}" type="button" style="background:var(--accent-rose);border-color:var(--accent-rose);color:#ffffff;font-weight:700;">Popraw hasło</button>`
           : `<button class="btn-outline btn-xs edit-acc-btn" data-alias="${escapeHtml(p.alias)}" type="button">Zmień hasło</button>`;
         const unpairChildBtn =
           p.hasParent && p.hasChild
@@ -2425,7 +2425,7 @@ async function renderVaultAndCalendarModule() {
               <span style="font-size:11.5px;color:var(--accent-rose);font-weight:600;">
                 Kalendarz .ics wstrzymany — Librus Synergia odrzuca obecne hasło profilu „${escapeHtml(profObj.displayName)}” (<code>access_denied</code>). Po poprawieniu hasła powyżej pojawi się tu nowy, działający link .ics do podmiany w Google Calendar.
               </span>
-              <button class="btn-primary btn-xs edit-acc-btn" data-alias="${escapeHtml(alias)}" type="button" style="background:var(--accent-rose);border-color:var(--accent-rose);">Popraw hasło w KROKU 1 ↑</button>
+              <button class="btn-primary btn-xs edit-acc-btn" data-alias="${escapeHtml(alias)}" type="button" style="background:var(--accent-rose);border-color:var(--accent-rose);color:#ffffff;font-weight:700;">Popraw hasło w KROKU 1 ↑</button>
             </div>
           </td>
         </tr>
@@ -2494,7 +2494,7 @@ async function renderVaultAndCalendarModule() {
             ${brokenProfiles
               .map(
                 (bp) =>
-                  `<button class="btn-primary btn-xs edit-acc-btn" data-alias="${escapeHtml(bp.alias)}" type="button" style="background:var(--accent-rose);border-color:var(--accent-rose);">Popraw hasło profilu „${escapeHtml(bp.displayName)}” w KROKU 1 ↓</button>`
+                  `<button class="btn-primary btn-xs edit-acc-btn" data-alias="${escapeHtml(bp.alias)}" type="button" style="background:var(--accent-rose);border-color:var(--accent-rose);color:#ffffff;font-weight:700;">Popraw hasło profilu „${escapeHtml(bp.displayName)}” w KROKU 1 ↓</button>`
               )
               .join("")}
           </div>
@@ -2588,7 +2588,7 @@ async function renderVaultAndCalendarModule() {
         <button id="saveStudentPairBtn" class="btn-primary btn-xs" type="button">+ Połącz konto</button>
         <span id="studentPairStatusMsg" class="card-subtitle" style="margin-left:auto;"></span>
       </div>
-      ` : hasConfiguredProfiles ? `
+      ` : hasConfiguredProfiles && brokenProfiles.length === 0 ? `
       <div class="pi-action-bar" style="border-left:0;border-right:0;border-bottom:0;padding:8px 14px;">
         <span class="card-subtitle" style="color:var(--accent-emerald);font-weight:600;">✓ Wszystkie skonfigurowane profile mają już połączone oba konta (Rodzic + Dziecko).</span>
       </div>

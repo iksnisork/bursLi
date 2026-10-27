@@ -2,13 +2,13 @@
  * Librus Family Hub — Service Worker
  * Handles local notifications / Web Push alerts and lightweight offline shell caching.
  */
-const CACHE_NAME = "bursli-hub-v14";
+const CACHE_NAME = "bursli-hub-v27";
 const SHELL_ASSETS = [
   "/",
-  "/static/fonts/option-f-fonts.css?v=14",
-  "/static/styles.css?v=14",
-  "/static/crypto-vault.js?v=14",
-  "/static/app.js?v=14",
+  "/static/fonts/option-f-fonts.css?v=26",
+  "/static/styles.css?v=26",
+  "/static/crypto-vault.js?v=27",
+  "/static/app.js?v=27",
   "/static/manifest.json"
 ];
 
