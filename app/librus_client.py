@@ -429,11 +429,15 @@ class StatelessLibrusHub:
     async def verify_student_account(
         self, student_username: str, student_password: str
     ) -> dict[str, Any]:
-        """Verify student Librus credentials before saving."""
+        """Verify parent or student Librus Synergia credentials before saving."""
         u = (student_username or "").strip()
         p = student_password or ""
         if not u or not p:
             return {"verified": False}
+        if "@" in u:
+            raise ValueError(
+                f"Wpisano adres e-mail („{u}”) zamiast loginu Synergia. Wpisz cyfrowy login do dziennika Librus Synergia (np. 8090546 dla rodzica lub 8090546u dla ucznia)."
+            )
         # In demo/mock mode, accept without live Librus network call
         if getattr(self, "_demo_mode", False):
             return {"verified": True, "student_name": u}
@@ -449,7 +453,7 @@ class StatelessLibrusHub:
             await service.__aenter__()
             client = service.account("student_verify")
             info = await client.student_information(max_age_seconds=0.0)
-            student_name = str(getattr(info, "student_name", "") or u).strip()
+            student_name = str(getattr(info, "name", None) or getattr(info, "student_name", "") or u).strip()
             class_name = str(getattr(info, "class_name", "") or "").strip()
             return {
                 "verified": True,
@@ -457,9 +461,11 @@ class StatelessLibrusHub:
                 "class_name": class_name,
             }
         except Exception as exc:
-            logger.warning("Student account verification failed: %s", type(exc).__name__)
+            logger.warning("Librus account verification failed for %s: %s", u, type(exc).__name__)
+            role_label = "dziecka/ucznia" if u.lower().endswith("u") else "rodzica"
             raise ValueError(
-                "Nie udało się zalogować do Librus Synergia. Sprawdź login (uczeń ma literę 'u' na końcu, rodzic bez 'u') oraz hasło."
+                f"Librus Synergia odrzucił logowanie dla konta {role_label} „{u}” (błędny login lub hasło). "
+                "Upewnij się, że wpisujesz hasło do dziennika Synergia (często inne niż hasło do e-mailowego Konta LIBRUS w aplikacji mobilnej — możesz je sprawdzić na portal.librus.pl/rodzina/synergia/loguj)."
             ) from exc
         finally:
             await self._safe_close_service(service)
@@ -504,7 +510,16 @@ class StatelessLibrusHub:
                 else ("student_only" if is_student_only else "parent_only")
             )
             try:
-                info = await client.student_information(max_age_seconds=300.0)
+                try:
+                    info = await client.student_information(max_age_seconds=300.0)
+                except Exception:
+                    student_key = f"{acc.alias}__student"
+                    if has_student and student_key in entry.backends:
+                        info = await entry.service.account(student_key).student_information(
+                            max_age_seconds=300.0
+                        )
+                    else:
+                        raise
                 full_name = str(info.name or acc.alias.capitalize()).strip()
                 first_name = full_name.split()[0] if full_name else acc.alias.capitalize()
                 school_lines = [
@@ -536,9 +551,16 @@ class StatelessLibrusHub:
                     "suggested_student_username": suggested_student,
                     "suggested_parent_username": suggested_parent,
                     "account_mode": account_mode,
+                    "auth_error": False,
+                    "auth_error_message": "",
                 }
             except Exception as exc:
                 logger.warning("Failed to load student_information for %s: %s", acc.alias, exc)
+                err_text = str(exc)
+                is_auth_err = (
+                    exc.__class__.__name__ == "AccessDeniedError"
+                    or "access_denied" in err_text.lower()
+                )
                 return {
                     "alias": acc.alias,
                     "account": acc.alias,
@@ -557,6 +579,12 @@ class StatelessLibrusHub:
                     "suggested_student_username": suggested_student,
                     "suggested_parent_username": suggested_parent,
                     "account_mode": account_mode,
+                    "auth_error": is_auth_err,
+                    "auth_error_message": (
+                        "Hasło lub login zostały odrzucone przez Librus Synergia (access_denied)."
+                        if is_auth_err
+                        else err_text
+                    ),
                 }
 
         profiles: list[dict[str, Any]] = []
@@ -883,6 +911,9 @@ class StatelessLibrusHub:
 
         # Collect agenda events in [start_date, end_date], excluding routine timetable
         # substitutions/cancellations, school holidays, and trips.
+        if agenda_results and all(isinstance(ag, BaseException) for ag in agenda_results):
+            raise agenda_results[0]
+
         raw_events = []
         for ag in agenda_results:
             if isinstance(ag, BaseException):

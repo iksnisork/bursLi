@@ -336,6 +336,36 @@ function extractDayLessonsFromPeriods(dayObj) {
   return out;
 }
 
+function renderModuleErrorCard(title, errMessage) {
+  const msg = String(errMessage || "");
+  const isAuthErr = /access_denied|odrzucono logowanie|nieprawidłow/i.test(msg);
+  els.contentArea.innerHTML = `
+    <div class="empty-day-card" style="max-width:680px;margin:24px auto;padding:20px 24px;text-align:left;border:1px solid ${isAuthErr ? "var(--accent-rose)" : "var(--border-color)"};">
+      <h3 style="color:${isAuthErr ? "var(--accent-rose)" : "var(--text-primary)"};margin-bottom:8px;">${escapeHtml(title)}</h3>
+      <p style="margin-bottom:12px;color:var(--text-primary);line-height:1.5;">${escapeHtml(msg)}</p>
+      ${
+        isAuthErr
+          ? `
+        <div style="padding:10px 12px;border-radius:6px;background:var(--bg-subtle);border-left:3px solid var(--accent-amber);font-size:12px;line-height:1.5;color:var(--text-secondary);margin-bottom:14px;">
+          <strong>Dlaczego Librus Synergia zwraca <code>access_denied</code>?</strong><br/>
+          • <strong>Hasło do Synergii vs Konto LIBRUS:</strong> Podaj hasło do dziennika szkolnego <strong>Librus Synergia</strong> (login cyfrowy np. <code>8090546</code> / <code>8090546u</code> na stronie <code>portal.librus.pl/rodzina/synergia/loguj</code>), a nie hasło do konta e-mail z aplikacji mobilnej Konto LIBRUS.<br/>
+          • <strong>Osobne hasła rodzica i dziecka:</strong> Konto rodzica (bez „u”) i konto ucznia (z „u”) mają dwa osobne hasła.
+        </div>
+        <button id="errorCardGoToVaultBtn" class="action-button" type="button">Przejdź do 06 Konta & .ics i popraw hasło →</button>
+      `
+          : ""
+      }
+    </div>
+  `;
+  const goBtn = document.getElementById("errorCardGoToVaultBtn");
+  if (goBtn) {
+    goBtn.onclick = () => {
+      state.pendingEditAlias = state.activeAccount;
+      switchModule("vault");
+    };
+  }
+}
+
 async function loadTimetable(forceRefresh = false) {
   if (!state.activeAccount) return;
   els.contentArea.innerHTML = `
@@ -359,7 +389,7 @@ async function loadTimetable(forceRefresh = false) {
     }
     renderTimetableModule();
   } catch (err) {
-    els.contentArea.innerHTML = `<div class="empty-day-card"><h3>BŁĄD POBIERANIA PLANU</h3><p>${escapeHtml(err.message)}</p></div>`;
+    renderModuleErrorCard("BŁĄD POBIERANIA PLANU", err.message);
   }
 }
 
@@ -542,7 +572,7 @@ async function loadExams(forceRefresh = false) {
     updateExamsBadge(items);
     renderExamsModule();
   } catch (err) {
-    els.contentArea.innerHTML = `<div class="empty-day-card"><h3>BŁĄD POBIERANIA TERMINARZA</h3><p>${escapeHtml(err.message)}</p></div>`;
+    renderModuleErrorCard("BŁĄD POBIERANIA TERMINARZA", err.message);
   }
 }
 
@@ -1001,7 +1031,7 @@ async function loadMaterials(forceRefresh = false) {
     }
     renderMaterialsModule();
   } catch (err) {
-    els.contentArea.innerHTML = `<div class="empty-day-card"><h3>BŁĄD POBIERANIA ZADAŃ</h3><p>${escapeHtml(err.message)}</p></div>`;
+    renderModuleErrorCard("BŁĄD POBIERANIA ZADAŃ", err.message);
   }
 }
 
@@ -1527,7 +1557,7 @@ async function loadGrades(forceRefresh = false) {
     state.gradesData = data;
     renderGradesModule();
   } catch (err) {
-    els.contentArea.innerHTML = `<div class="empty-day-card"><h3>BŁĄD POBIERANIA OCEN</h3><p>${escapeHtml(err.message)}</p></div>`;
+    renderModuleErrorCard("BŁĄD POBIERANIA OCEN", err.message);
   }
 }
 
@@ -1889,7 +1919,7 @@ async function loadMessages(forceRefresh = false) {
     }
     renderMessagesModule();
   } catch (err) {
-    els.contentArea.innerHTML = `<div class="empty-day-card"><h3>BŁĄD POBIERANIA WIADOMOŚCI</h3><p>${escapeHtml(err.message)}</p></div>`;
+    renderModuleErrorCard("BŁĄD POBIERANIA WIADOMOŚCI", err.message);
   }
 }
 
@@ -2282,6 +2312,8 @@ async function renderVaultAndCalendarModule() {
       item.first_name ||
       alias;
     const className = serverMatch.class_name || item.class_name || "";
+    const authError = Boolean(serverMatch.auth_error || item.auth_error);
+    const authErrorMessage = serverMatch.auth_error_message || item.auth_error_message || "";
     return {
       alias,
       displayName,
@@ -2294,10 +2326,13 @@ async function renderVaultAndCalendarModule() {
       studentUsername,
       suggestedStudent,
       suggestedParent,
+      authError,
+      authErrorMessage,
       raw: item,
     };
   });
 
+  const brokenProfiles = unifiedProfiles.filter((p) => p.authError);
   const activeProfileObj =
     unifiedProfiles.find((p) => p.alias === state.activeAccount) ||
     unifiedProfiles[0] ||
@@ -2320,11 +2355,18 @@ async function renderVaultAndCalendarModule() {
         detailsHtml = `Dziecko (uczeń): <code>${escapeHtml(p.studentUsername)}</code> · brak połączonego konta rodzica`;
       }
 
+      if (p.authError) {
+        modeBadge = `<span class="badge badge-cancelled" title="${escapeHtml(p.authErrorMessage)}">⚠ BŁĄD LOGOWANIA LIBRUS (ODRZUCONE HASŁO)</span> ${modeBadge}`;
+      }
+
       if (p.className) {
         detailsHtml = `KLASA ${escapeHtml(p.className)} · ` + detailsHtml;
       }
 
       if (p.isLocal) {
+        const fixPassBtn = p.authError
+          ? `<button class="btn-primary btn-xs edit-acc-btn" data-alias="${escapeHtml(p.alias)}" type="button" style="background:var(--accent-rose);border-color:var(--accent-rose);">Popraw hasło</button>`
+          : `<button class="btn-outline btn-xs edit-acc-btn" data-alias="${escapeHtml(p.alias)}" type="button">Zmień hasło</button>`;
         const unpairChildBtn =
           p.hasParent && p.hasChild
             ? `<button class="btn-outline btn-xs unpair-local-child-btn" data-alias="${escapeHtml(p.alias)}" type="button" title="Zostaw tylko konto rodzica">Odłącz dziecko</button>`
@@ -2335,6 +2377,7 @@ async function renderVaultAndCalendarModule() {
             : "";
         actionsHtml = `
           <div style="display:inline-flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;">
+            ${fixPassBtn}
             ${unpairChildBtn}
             ${unpairParentBtn}
             <button class="btn-outline btn-xs remove-acc-btn" data-alias="${escapeHtml(p.alias)}" type="button">Usuń profil</button>
@@ -2348,7 +2391,7 @@ async function renderVaultAndCalendarModule() {
       }
 
       return `
-        <tr>
+        <tr style="${p.authError ? "background:rgba(225, 29, 72, 0.06);" : ""}">
           <td style="width:140px;">
             <span class="badge ${p.isLocal ? "badge-info" : "badge-now"}">${p.isLocal ? "INDEXEDDB VAULT" : "SERWER DOMOWY"}</span>
           </td>
@@ -2360,7 +2403,7 @@ async function renderVaultAndCalendarModule() {
               ${modeBadge}
             </div>
           </td>
-          <td style="width:220px;text-align:right;">
+          <td style="width:260px;text-align:right;">
             ${actionsHtml}
           </td>
         </tr>
@@ -2370,6 +2413,25 @@ async function renderVaultAndCalendarModule() {
 
   const icsRowsHtml = [];
   Object.entries(activeLinks).forEach(([alias, f]) => {
+    const profObj = unifiedProfiles.find((p) => p.alias === alias);
+    const hasAuthErr = Boolean(profObj && profObj.authError);
+    if (hasAuthErr) {
+      icsRowsHtml.push(`
+        <tr style="background:rgba(225, 29, 72, 0.06);">
+          <td style="width:105px;"><span class="cell-primary">${escapeHtml(alias.toUpperCase())}</span></td>
+          <td style="width:170px;"><span class="badge badge-cancelled">⚠ HASŁO ODRZUCONE</span></td>
+          <td colspan="2">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:11.5px;color:var(--accent-rose);font-weight:600;">
+                Kalendarz .ics wstrzymany — Librus Synergia odrzuca obecne hasło profilu „${escapeHtml(profObj.displayName)}” (<code>access_denied</code>). Po poprawieniu hasła powyżej pojawi się tu nowy, działający link .ics do podmiany w Google Calendar.
+              </span>
+              <button class="btn-primary btn-xs edit-acc-btn" data-alias="${escapeHtml(alias)}" type="button" style="background:var(--accent-rose);border-color:var(--accent-rose);">Popraw hasło w KROKU 1 ↑</button>
+            </div>
+          </td>
+        </tr>
+      `);
+      return;
+    }
     const gcalAddByUrl = sanitizeHttpUrl(
       f.gcal_add_by_url_page || "https://calendar.google.com/calendar/u/0/r/settings/addbyurl"
     );
@@ -2405,22 +2467,47 @@ async function renderVaultAndCalendarModule() {
     incompleteProfiles.find((p) => p.alias === state.activeAccount) ||
     incompleteProfiles[0] ||
     null;
-  const initialPairRole =
-    defaultPairProfile && !defaultPairProfile.hasParent && defaultPairProfile.hasChild
-      ? "parent"
-      : "student";
 
-  const findProfileByLogin = (loginCandidate) => {
+  const findProfileByLogin = (loginCandidate, ignoreAlias = "") => {
     const clean = (loginCandidate || "").trim().toLowerCase();
+    const cleanIgnore = (ignoreAlias || "").trim().toLowerCase();
     if (!clean) return null;
     return (
       unifiedProfiles.find(
         (p) =>
-          (p.parentUsername && p.parentUsername.toLowerCase() === clean) ||
-          (p.studentUsername && p.studentUsername.toLowerCase() === clean)
+          p.alias.toLowerCase() !== cleanIgnore &&
+          ((p.parentUsername && p.parentUsername.toLowerCase() === clean) ||
+            (p.studentUsername && p.studentUsername.toLowerCase() === clean))
       ) || null
     );
   };
+
+  const authDiagnosisBannerHtml =
+    brokenProfiles.length > 0
+      ? `
+      <div class="pi-action-bar" style="border-left:0;border-right:0;background:rgba(225, 29, 72, 0.08);border-bottom:1px solid var(--accent-rose);flex-direction:column;align-items:stretch;gap:8px;padding:12px 14px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <span style="font-family:var(--accent-mono);font-size:11.5px;font-weight:700;color:var(--accent-rose);">
+            ⚠ LIBRUS SYNERGIA ODRZUCIŁ LOGOWANIE (ACCESS_DENIED) DLA PROFILU: ${brokenProfiles.map((bp) => escapeHtml(bp.displayName.toUpperCase())).join(", ")}
+          </span>
+          <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
+            ${brokenProfiles
+              .map(
+                (bp) =>
+                  `<button class="btn-primary btn-xs edit-acc-btn" data-alias="${escapeHtml(bp.alias)}" type="button" style="background:var(--accent-rose);border-color:var(--accent-rose);">Popraw hasło profilu „${escapeHtml(bp.displayName)}” w KROKU 1 ↓</button>`
+              )
+              .join("")}
+          </div>
+        </div>
+        <div style="font-size:12px;line-height:1.5;color:var(--text-primary);">
+          <strong>Sprawdź 3 najczęstsze przyczyny błędu <code>access_denied</code> w Librusie:</strong><br/>
+          1. <strong>Hasło do Synergii vs Konto LIBRUS (aplikacja mobilna):</strong> W Librusie istnieją dwa różne hasła — konto e-mail w aplikacji mobilnej (<em>Konto LIBRUS</em>) oraz właściwe konto szkolne <strong>Librus Synergia</strong> (login cyfrowy np. <code>8090546</code> / <code>8090546u</code>). Tutaj podaj hasło, którym logujesz się bezpośrednio pod adresem <a href="https://portal.librus.pl/rodzina/synergia/loguj" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;font-weight:600;">portal.librus.pl/rodzina/synergia/loguj ↗</a>.<br/>
+          2. <strong>Osobne hasła rodzica i dziecka:</strong> Konto rodzica (bez „u”) oraz konto ucznia (z „u”) mają w Synergii dwa niezależne hasła.<br/>
+          3. <strong>Ważne dla Google Calendar (.ics):</strong> Ponieważ bursLi nie ma bazy danych, Twoje hasło jest zaszyfrowane wewnątrz samego linku <code>.ics</code> (<code>lfh1...</code>). Po poprawieniu hasła w KROKU 1 poniżej <strong>skopiuj nowy link .ics i dodaj go na nowo w Google Calendar</strong> (stary link w Google Calendar nadal zawiera stare hasło).
+        </div>
+      </div>
+    `
+      : "";
 
   const profileSelectOptions = unifiedProfiles
     .map((p) => {
@@ -2444,10 +2531,12 @@ async function renderVaultAndCalendarModule() {
         <span class="pi-counter">${unifiedProfiles.length} PROFILI</span>
       </div>
 
-      <!-- STEP 1: Add New Profile (Parent + Child, Parent only, or Child only) -->
-      <div class="pi-action-bar" style="border-left:0;border-right:0;background:var(--bg-subtle);flex-direction:column;align-items:stretch;gap:8px;padding:12px 14px;">
+      ${authDiagnosisBannerHtml}
+
+      <!-- STEP 1: Add New Profile or Fix Password (Parent + Child, Parent only, or Child only) -->
+      <div id="vaultStep1Container" class="pi-action-bar" style="border-left:0;border-right:0;background:var(--bg-subtle);flex-direction:column;align-items:stretch;gap:8px;padding:12px 14px;">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
-          <span class="toolbar-title" style="font-size:11px;color:var(--accent-primary);">KROK 1 · ZAŁÓŻ NOWY PROFIL (MOŻESZ PODAĆ KONTO RODZICA, KONTO DZIECKA LUB OBA NARAZ):</span>
+          <span id="vaultStep1Title" class="toolbar-title" style="font-size:11px;color:var(--accent-primary);">KROK 1 · ZAŁÓŻ NOWY PROFIL (MOŻESZ PODAĆ KONTO RODZICA, KONTO DZIECKA LUB OBA NARAZ):</span>
           <span class="card-subtitle">Login rodzica nie ma litery „u” (np. <code>8090546</code>), a login dziecka ma końcówkę „u” (np. <code>8090546u</code>).</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -2548,10 +2637,14 @@ async function renderVaultAndCalendarModule() {
   els.contentArea.appendChild(wrapper);
 
   // Step 1: Suffix 'u' & duplicate login live detection + field swap helpers
+  const vaultLabelInput = document.getElementById("vaultLabelInput");
+  const vaultAliasInput = document.getElementById("vaultAliasInput");
   const vaultLoginInput = document.getElementById("vaultLoginInput");
   const vaultPasswordInput = document.getElementById("vaultPasswordInput");
   const vaultStudentLoginInput = document.getElementById("vaultStudentLoginInput");
   const vaultStudentPasswordInput = document.getElementById("vaultStudentPasswordInput");
+  const vaultStep1Title = document.getElementById("vaultStep1Title");
+  const saveVaultAccountBtn = document.getElementById("saveVaultAccountBtn");
   const vaultLoginHintBar = document.getElementById("vaultLoginHintBar");
   const vaultLoginHintText = document.getElementById("vaultLoginHintText");
   const vaultMoveToChildBtn = document.getElementById("vaultMoveToChildBtn");
@@ -2561,18 +2654,31 @@ async function renderVaultAndCalendarModule() {
   const evaluateStep1LoginFields = () => {
     const parentLogin = (vaultLoginInput.value || "").trim();
     const childLogin = (vaultStudentLoginInput.value || "").trim();
+    const editingAlias = (vaultAliasInput.value || "").trim().toLowerCase();
     vaultMoveToChildBtn.style.display = "none";
     vaultAppendUBtn.style.display = "none";
     vaultMoveToParentBtn.style.display = "none";
+    vaultLoginHintBar.style.borderColor = "var(--accent-amber)";
+    vaultLoginHintBar.style.background = "rgba(245, 158, 11, 0.12)";
+
+    // Case -1: User entered an e-mail address instead of numeric Synergia login
+    if (parentLogin.includes("@") || childLogin.includes("@")) {
+      vaultLoginHintBar.style.display = "flex";
+      vaultLoginHintBar.style.borderColor = "var(--accent-rose)";
+      vaultLoginHintBar.style.background = "rgba(225, 29, 72, 0.10)";
+      vaultLoginHintText.textContent =
+        "Podano adres e-mail — Librus Synergia wymaga loginu cyfrowego ze szkoły (np. 8090546 dla rodzica lub 8090546u dla ucznia), a nie adresu e-mail z Konta LIBRUS.";
+      return "email_entered";
+    }
 
     // Case 0: Check if entered login is already connected to an existing profile
-    const existingParentMatch = findProfileByLogin(parentLogin);
+    const existingParentMatch = findProfileByLogin(parentLogin, editingAlias);
     if (existingParentMatch) {
       vaultLoginHintBar.style.display = "flex";
       vaultLoginHintText.textContent = `Konto „${parentLogin}” jest już połączone z profilem „${existingParentMatch.displayName}” w tabeli poniżej.`;
       return "duplicate_parent";
     }
-    const existingChildMatch = findProfileByLogin(childLogin);
+    const existingChildMatch = findProfileByLogin(childLogin, editingAlias);
     if (existingChildMatch) {
       vaultLoginHintBar.style.display = "flex";
       vaultLoginHintText.textContent = `Konto „${childLogin}” jest już połączone z profilem „${existingChildMatch.displayName}” w tabeli poniżej.`;
@@ -2608,6 +2714,50 @@ async function renderVaultAndCalendarModule() {
     vaultLoginHintBar.style.display = "none";
     return "ok";
   };
+
+  const prefillStep1ForEdit = (alias) => {
+    const prof = unifiedProfiles.find((p) => p.alias === alias);
+    if (!prof) return;
+    vaultLabelInput.value = prof.displayName || prof.alias;
+    vaultAliasInput.value = prof.alias;
+    vaultLoginInput.value = prof.parentUsername || "";
+    vaultPasswordInput.value = "";
+    vaultStudentLoginInput.value = prof.studentUsername || "";
+    vaultStudentPasswordInput.value = "";
+
+    if (vaultStep1Title) {
+      vaultStep1Title.style.color = prof.authError ? "var(--accent-rose)" : "var(--accent-primary)";
+      vaultStep1Title.textContent = `KROK 1 · POPRAW HASŁO DO LIBRUS SYNERGIA DLA PROFILU „${prof.displayName.toUpperCase()}” (${prof.alias}):`;
+    }
+    if (saveVaultAccountBtn) {
+      saveVaultAccountBtn.textContent = `Zweryfikuj i zapisz hasło (${prof.displayName})`;
+    }
+    vaultLoginHintBar.style.display = "flex";
+    vaultLoginHintBar.style.borderColor = "var(--accent-primary)";
+    vaultLoginHintBar.style.background = "var(--pastel-sky-bg)";
+    vaultLoginHintText.textContent = `Edycja profilu „${prof.displayName}” — wpisz poprawne hasło do dziennika Librus Synergia (portal.librus.pl/rodzina/synergia/loguj) i kliknij przycisk zapisu.`;
+    const step1El = document.getElementById("vaultStep1Container");
+    if (step1El && step1El.scrollIntoView) {
+      step1El.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    if (prof.hasParent || !prof.hasChild) {
+      vaultPasswordInput.focus();
+    } else {
+      vaultStudentPasswordInput.focus();
+    }
+  };
+
+  wrapper.querySelectorAll(".edit-acc-btn").forEach((btn) => {
+    btn.onclick = () => prefillStep1ForEdit(btn.dataset.alias);
+  });
+
+  if (state.pendingEditAlias) {
+    const targetAlias = state.pendingEditAlias;
+    state.pendingEditAlias = null;
+    setTimeout(() => prefillStep1ForEdit(targetAlias), 40);
+  } else if (brokenProfiles.length === 1) {
+    setTimeout(() => prefillStep1ForEdit(brokenProfiles[0].alias), 40);
+  }
 
   vaultLoginInput.addEventListener("input", evaluateStep1LoginFields);
   vaultStudentLoginInput.addEventListener("input", evaluateStep1LoginFields);
@@ -2897,16 +3047,26 @@ async function renderVaultAndCalendarModule() {
     };
   });
 
-  // Bind Step 1 Vault Save button (supports Parent+Child, Parent-Only, or Child-Only)
+  // Bind Step 1 Vault Save button (supports Parent+Child, Parent-Only, or Child-Only + live Librus verification)
   document.getElementById("saveVaultAccountBtn").onclick = async () => {
-    const label = document.getElementById("vaultLabelInput").value.trim();
+    const label = vaultLabelInput.value.trim();
+    const editingAlias = vaultAliasInput.value.trim().toLowerCase();
     const login = vaultLoginInput.value.trim();
     const password = vaultPasswordInput.value;
     const student_username = vaultStudentLoginInput.value.trim();
     const student_password = vaultStudentPasswordInput.value;
 
-    // 0. Prevent adding a login that is already connected to an existing profile
-    const dupParent = findProfileByLogin(login);
+    if (login.includes("@") || student_username.includes("@")) {
+      evaluateStep1LoginFields();
+      showToast(
+        "Podaj cyfrowy login Librus Synergia (np. 8090546 lub 8090546u), a nie adres e-mail.",
+        5500
+      );
+      return;
+    }
+
+    // 0. Prevent adding a login that is already connected to another profile
+    const dupParent = findProfileByLogin(login, editingAlias);
     if (dupParent) {
       evaluateStep1LoginFields();
       showToast(
@@ -2915,7 +3075,7 @@ async function renderVaultAndCalendarModule() {
       );
       return;
     }
-    const dupChild = findProfileByLogin(student_username);
+    const dupChild = findProfileByLogin(student_username, editingAlias);
     if (dupChild) {
       evaluateStep1LoginFields();
       showToast(
@@ -2964,7 +3124,35 @@ async function renderVaultAndCalendarModule() {
     }
 
     const fallbackLabel = label || login || student_username;
-    const alias = document.getElementById("vaultAliasInput").value.trim() || fallbackLabel;
+    const alias = vaultAliasInput.value.trim() || fallbackLabel;
+    const prevBtnText = saveVaultAccountBtn.textContent;
+    saveVaultAccountBtn.disabled = true;
+    saveVaultAccountBtn.textContent = "Weryfikacja logowania w Librus Synergia...";
+
+    try {
+      await apiFetch("/api/vault/student-account", {
+        method: "POST",
+        body: {
+          alias,
+          account: alias,
+          parent_username: login,
+          parent_password: password,
+          student_username,
+          student_password,
+          verify: true,
+          verify_only: true,
+        },
+      });
+    } catch (err) {
+      saveVaultAccountBtn.disabled = false;
+      saveVaultAccountBtn.textContent = prevBtnText;
+      vaultLoginHintBar.style.display = "flex";
+      vaultLoginHintBar.style.borderColor = "var(--accent-rose)";
+      vaultLoginHintBar.style.background = "rgba(225, 29, 72, 0.10)";
+      vaultLoginHintText.textContent = `${err.message}`;
+      showToast(`${err.message}`, 6500);
+      return;
+    }
 
     await window.LibrusVault.addOrUpdateAccount({
       alias,
@@ -2980,8 +3168,13 @@ async function renderVaultAndCalendarModule() {
         : hasParentCreds
           ? "Tylko Rodzic"
           : "Tylko Dziecko (Uczeń)";
-    showToast(`Założono profil (${modeLabel}) i zaszyfrowano w przeglądarce!`);
-    await bootstrapProfiles();
+    showToast(
+      editingAlias
+        ? `Zweryfikowano w Librusie i zapisano nowe hasło (${modeLabel})! Skopiuj nowy link .ics do Google Calendar.`
+        : `Zweryfikowano w Librusie i założono profil (${modeLabel})!`,
+      5500
+    );
+    await bootstrapProfiles(true);
     await renderVaultAndCalendarModule();
   };
 
@@ -2989,7 +3182,7 @@ async function renderVaultAndCalendarModule() {
     btn.onclick = async () => {
       await window.LibrusVault.removeAccount(btn.dataset.alias);
       showToast("Konto usunięte z pamięci przeglądarki.");
-      await bootstrapProfiles();
+      await bootstrapProfiles(true);
       await renderVaultAndCalendarModule();
     };
   });
@@ -3008,7 +3201,7 @@ async function renderVaultAndCalendarModule() {
         state.sealedToken = res.sealed_token || res.token || state.sealedToken;
         state.kioskUrl = res.kiosk_url || state.kioskUrl;
       } else {
-        await bootstrapProfiles();
+        await bootstrapProfiles(true);
       }
       showToast("Odświeżono kanały .ics oraz zaszyfrowany link dla ekranu!");
       await renderVaultAndCalendarModule();
@@ -3085,12 +3278,12 @@ async function refreshBackgroundAlerts() {
 /* ==========================================================================
    INITIALIZATION & EVENT LISTENERS (Default Theme: LIGHT)
    ========================================================================== */
-async function bootstrapProfiles() {
+async function bootstrapProfiles(forceRefresh = false) {
   if (window.LibrusVault) {
     await window.LibrusVault.loadAccounts();
   }
   try {
-    const data = await apiFetch("/api/profiles");
+    const data = await apiFetch(`/api/profiles${forceRefresh ? "?refresh=1" : ""}`);
     state.profiles = data.profiles || [];
     state.icalLinks = data.ical_links || {};
     state.sealedToken = data.sealed_token || data.token || state.urlToken || "";
@@ -3099,6 +3292,14 @@ async function bootstrapProfiles() {
       (state.sealedToken
         ? `${window.location.origin}/?token=${encodeURIComponent(state.sealedToken)}&nesthub=1`
         : "");
+    if (window.LibrusVault && state.sealedToken) {
+      window.LibrusVault.setCachedSealedToken({
+        sealed_token: state.sealedToken,
+        token: state.sealedToken,
+        ical_links: state.icalLinks,
+        kiosk_url: state.kioskUrl,
+      });
+    }
     if (state.profiles.length > 0) {
       if (!state.activeAccount || !state.profiles.some((p) => (p.alias || p.account) === state.activeAccount)) {
         state.activeAccount = state.profiles[0].alias || state.profiles[0].account;
@@ -3337,8 +3538,20 @@ async function initApp() {
 
   await bootstrapProfiles();
   if (state.activeAccount) {
-    await loadTimetable(false);
-    refreshBackgroundAlerts();
+    const activeProfileObj = state.profiles.find(
+      (p) => (p.alias || p.account) === state.activeAccount
+    );
+    if (activeProfileObj && activeProfileObj.auth_error) {
+      state._vaultEditAlias = state.activeAccount;
+      switchModule("vault");
+      showToast(
+        `Librus Synergia odrzucił hasło dla profilu "${state.activeAccount}" — popraw je w KROKU 1.`,
+        true
+      );
+    } else {
+      await loadTimetable(false);
+      refreshBackgroundAlerts();
+    }
   } else {
     switchModule("vault");
   }

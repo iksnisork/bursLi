@@ -557,3 +557,67 @@ def test_three_account_modes_parent_student_and_both(tmp_path: Path) -> None:
     assert hub._is_student_only_account(payload, "parent_only") is False
     assert hub._is_student_only_account(payload, "student_only") is True
 
+
+@pytest.mark.asyncio
+async def test_auth_error_surfaced_in_profiles_and_exams(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.librus_client import MessagingBackend, PooledServiceEntry
+
+    class AccessDeniedError(Exception):
+        pass
+
+    class DummyDeniedClient:
+        async def student_information(self, **_kwargs: object) -> object:
+            raise AccessDeniedError("access_denied")
+
+        async def agenda(self, *_args: object, **_kwargs: object) -> object:
+            raise AccessDeniedError("access_denied")
+
+        async def completed_lessons(self, *_args: object, **_kwargs: object) -> object:
+            raise AccessDeniedError("access_denied")
+
+        async def homework(self, *_args: object, **_kwargs: object) -> object:
+            raise AccessDeniedError("access_denied")
+
+        async def announcements(self, *_args: object, **_kwargs: object) -> object:
+            raise AccessDeniedError("access_denied")
+
+        async def messages(self, *_args: object, **_kwargs: object) -> object:
+            raise AccessDeniedError("access_denied")
+
+    class DummyDeniedService:
+        def account(self, _key: str) -> DummyDeniedClient:
+            return DummyDeniedClient()
+
+    hub = StatelessLibrusHub(local_config_path=tmp_path / "nonexistent.json")
+    payload = UnsealedVaultPayload(
+        accounts=(
+            SealedAccount(
+                alias="mila",
+                username="8090999",
+                password="bad-parent-password",
+                student_username="8090999u",
+                student_password="bad-student-password",
+            ),
+        )
+    )
+
+    async def _fake_acquire_entry(_vault: UnsealedVaultPayload) -> PooledServiceEntry:
+        return PooledServiceEntry(
+            service=DummyDeniedService(),  # type: ignore[arg-type]
+            backends={"mila": MessagingBackend.MODERN, "mila__student": MessagingBackend.MODERN},
+            created_at=0.0,
+            last_used_at=0.0,
+        )
+
+    monkeypatch.setattr(hub, "_acquire_entry", _fake_acquire_entry)
+
+    profiles = await hub.get_profiles(payload)
+    assert len(profiles) == 1
+    assert profiles[0]["alias"] == "mila"
+    assert profiles[0]["auth_error"] is True
+    assert "odrzucone przez Librus Synergia" in profiles[0]["auth_error_message"]
+
+    with pytest.raises(AccessDeniedError):
+        await hub.get_exams_and_study_cards(payload, "mila", days_ahead=14)
+
+

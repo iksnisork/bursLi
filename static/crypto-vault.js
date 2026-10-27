@@ -114,6 +114,11 @@
         student_password: String(a.student_password || ""),
       }));
     memoryAccounts = clean;
+    try {
+      localStorage.removeItem(SEALED_TOKEN_STORAGE_KEY);
+    } catch {
+      // ignore storage errors
+    }
 
     try {
       const db = await openVaultDB();

@@ -579,14 +579,15 @@ class DashboardServer:
         parent_username = str(body.get("parent_username") or "").strip()
         parent_password = str(body.get("parent_password") or "")
         verify_now = bool(body.get("verify", True))
+        verify_only = bool(body.get("verify_only", False))
 
-        if not alias:
+        if not alias and not verify_only:
             with contextlib.suppress(Exception):
                 vault_fallback, _, _ = self._resolve_vault(request)
                 if vault_fallback.accounts:
                     alias = vault_fallback.accounts[0].alias
 
-        if not alias:
+        if not alias and not verify_only:
             return web.json_response({"ok": False, "error": "Brak aliasu profilu."}, status=400)
 
         try:
@@ -595,9 +596,21 @@ class DashboardServer:
                 student_info = await self.hub.verify_student_account(
                     parent_username, parent_password
                 )
-            elif student_username and student_password and verify_now:
-                student_info = await self.hub.verify_student_account(
+            if student_username and student_password and verify_now:
+                child_info = await self.hub.verify_student_account(
                     student_username, student_password
+                )
+                if not student_info:
+                    student_info = child_info
+
+            if verify_only:
+                return web.json_response(
+                    {
+                        "ok": True,
+                        "verified": True,
+                        "alias": alias,
+                        "student_info": student_info,
+                    }
                 )
 
             if (
