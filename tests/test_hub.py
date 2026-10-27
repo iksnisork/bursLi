@@ -22,6 +22,7 @@ from app.crypto_tokens import (
     SealedAccount,
     TokenValidationError,
     TokenVault,
+    UnsealedVaultPayload,
 )
 from app.librus_client import (
     StatelessLibrusHub,
@@ -525,3 +526,34 @@ def test_ssrf_webhook_validation_and_docx_xxe_rejection() -> None:
         )
         is None
     )
+
+
+def test_three_account_modes_parent_student_and_both(tmp_path: Path) -> None:
+    hub = StatelessLibrusHub(local_config_path=tmp_path / "nonexistent.json")
+    payload = UnsealedVaultPayload(
+        accounts=(
+            SealedAccount(
+                alias="both_acc",
+                username="8090546",
+                password="p1",
+                student_username="8090546u",
+                student_password="s1",
+            ),
+            SealedAccount(
+                alias="parent_only",
+                username="8090547",
+                password="p2",
+            ),
+            SealedAccount(
+                alias="student_only",
+                username="8090548u",
+                password="s3",
+                student_username="8090548u",
+                student_password="s3",
+            ),
+        )
+    )
+    assert hub._is_student_only_account(payload, "both_acc") is False
+    assert hub._is_student_only_account(payload, "parent_only") is False
+    assert hub._is_student_only_account(payload, "student_only") is True
+

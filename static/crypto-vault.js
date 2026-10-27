@@ -144,7 +144,17 @@
 
   async function addOrUpdateAccount({ alias, label, login, password, student_username, student_password }) {
     const accounts = await loadAccounts();
-    const normAlias = String(alias || label || login)
+    const resolvedStudentUser =
+      student_username !== undefined
+        ? String(student_username || "").trim()
+        : undefined;
+    const resolvedStudentPass =
+      student_password !== undefined
+        ? String(student_password || "")
+        : undefined;
+    const resolvedLogin = String(login || resolvedStudentUser || "").trim();
+    const resolvedPassword = String(password || resolvedStudentPass || "");
+    const normAlias = String(alias || label || resolvedLogin)
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9_-]/g, "");
@@ -153,15 +163,15 @@
     const entry = {
       alias: normAlias,
       label: String(label || alias || normAlias).trim(),
-      login: String(login).trim(),
-      password: String(password),
+      login: resolvedLogin,
+      password: resolvedPassword,
       student_username:
-        student_username !== undefined
-          ? String(student_username || "").trim()
+        resolvedStudentUser !== undefined
+          ? resolvedStudentUser
           : String(prev.student_username || "").trim(),
       student_password:
-        student_password !== undefined
-          ? String(student_password || "")
+        resolvedStudentPass !== undefined
+          ? resolvedStudentPass
           : String(prev.student_password || ""),
     };
     if (existingIdx >= 0) {

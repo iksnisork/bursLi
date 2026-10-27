@@ -661,8 +661,12 @@ function renderExamsModule() {
     `;
   }).join("");
 
-  const studentAccountStrip = hasStudentAccount
+  const hasParentAccount = currentProfile ? currentProfile.has_parent_account !== false : true;
+  const suggestedParentLogin = (currentProfile && currentProfile.suggested_parent_username) || "";
+  const studentAccountStrip = hasParentAccount && hasStudentAccount
     ? `<span class="badge badge-now" title="Wiadomości z wymaganiami są pobierane z konta rodzica oraz konta ucznia">RODZIC + UCZEŃ</span>`
+    : !hasParentAccount && hasStudentAccount
+    ? `<button type="button" id="pairStudentAccountQuickBtn" class="btn-outline btn-xs" title="Połącz dodatkowo konto rodzica, aby pobierać wiadomości wysyłane tylko do rodziców">+ Połącz konto rodzica${suggestedParentLogin ? ` (${escapeHtml(suggestedParentLogin)})` : ""}</button>`
     : `<button type="button" id="pairStudentAccountQuickBtn" class="btn-outline btn-xs" title="Część nauczycieli wysyła wymagania tylko na konto dziecka">+ Połącz konto ucznia${suggestedStudentLogin ? ` (${escapeHtml(suggestedStudentLogin)})` : ""}</button>`;
 
   panel.innerHTML = `
@@ -2243,61 +2247,126 @@ async function renderVaultAndCalendarModule() {
   wrapper.style.gap = "12px";
   wrapper.style.paddingBottom = "24px";
 
-  const activeProfileObj =
-    state.profiles.find((p) => (p.alias || p.account) === state.activeAccount) ||
-    state.profiles[0] ||
-    null;
-  const defaultSuggestedStudent = (activeProfileObj && activeProfileObj.suggested_student_username) || "";
+  const unifiedProfiles = (localAccounts.length > 0 ? localAccounts : state.profiles).map((item) => {
+    const alias = item.alias || item.account || "";
+    const serverMatch = state.profiles.find((p) => (p.alias || p.account) === alias) || {};
+    const isLocal = Boolean(item.login !== undefined);
+    const isStudentOnly = isLocal
+      ? Boolean(item.student_username && item.login === item.student_username)
+      : Boolean(
+          item.account_mode === "student_only" ||
+            (!item.has_parent_account && item.has_student_account)
+        );
+    const hasParent = isLocal
+      ? Boolean(item.login && !isStudentOnly)
+      : Boolean(item.has_parent_account !== false && !isStudentOnly);
+    const hasChild = isLocal
+      ? Boolean(item.student_username)
+      : Boolean(item.has_student_account);
+    const parentUsername = hasParent
+      ? (isLocal ? item.login : item.parent_username || "")
+      : "";
+    const studentUsername = hasChild
+      ? (isLocal ? item.student_username : item.student_username || "")
+      : "";
+    const baseNum = (parentUsername || studentUsername).replace(/u$/i, "");
+    const suggestedStudent =
+      serverMatch.suggested_student_username || (baseNum ? `${baseNum}u` : "");
+    const suggestedParent =
+      serverMatch.suggested_parent_username || baseNum || "";
+    const displayName =
+      item.label ||
+      serverMatch.full_name ||
+      serverMatch.first_name ||
+      item.full_name ||
+      item.first_name ||
+      alias;
+    const className = serverMatch.class_name || item.class_name || "";
+    return {
+      alias,
+      displayName,
+      className,
+      isLocal,
+      isStudentOnly,
+      hasParent,
+      hasChild,
+      parentUsername,
+      studentUsername,
+      suggestedStudent,
+      suggestedParent,
+      raw: item,
+    };
+  });
 
-  const accountRowsHtml = localAccounts.length === 0
-    ? state.profiles.map((p) => {
-        const alias = p.alias || p.account;
-        const hasChild = Boolean(p.has_student_account);
-        const childBadge = hasChild
-          ? `<span class="badge badge-now">RODZIC + UCZEŃ (${escapeHtml(p.student_username || "AKTYWNE")})</span>`
-          : `<span class="badge badge-sub">TYLKO RODZIC${p.suggested_student_username ? ` (sugerowany login ucznia: ${escapeHtml(p.suggested_student_username)})` : ""}</span>`;
-        return `
-          <tr>
-            <td style="width:140px;"><span class="badge badge-now">SERWER DOMOWY</span></td>
-            <td style="width:200px;"><span class="cell-primary">${escapeHtml(p.full_name || p.first_name)}</span></td>
-            <td style="width:110px;"><code>${escapeHtml(alias)}</code></td>
-            <td>
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                <span>KLASA ${escapeHtml(p.class_name || "---")} · Rodzic: <code>${escapeHtml(p.parent_username || "---")}</code></span>
-                ${childBadge}
-              </div>
-            </td>
-            <td style="width:140px;text-align:right;">
-              ${hasChild
-                ? `<button class="btn-outline btn-xs unpair-child-btn" data-alias="${escapeHtml(alias)}" type="button">Odłącz ucznia</button>`
-                : `<span class="cell-secondary">AKTYWNE</span>`
-              }
-            </td>
-          </tr>
+  const activeProfileObj =
+    unifiedProfiles.find((p) => p.alias === state.activeAccount) ||
+    unifiedProfiles[0] ||
+    null;
+
+  const accountRowsHtml = unifiedProfiles
+    .map((p) => {
+      let modeBadge = "";
+      let detailsHtml = "";
+      let actionsHtml = "";
+
+      if (p.hasParent && p.hasChild) {
+        modeBadge = `<span class="badge badge-now">RODZIC + DZIECKO (UCZEŃ)</span>`;
+        detailsHtml = `Rodzic: <code>${escapeHtml(p.parentUsername)}</code> · Dziecko: <code>${escapeHtml(p.studentUsername)}</code>`;
+      } else if (p.hasParent && !p.hasChild) {
+        modeBadge = `<span class="badge badge-sub">TYLKO RODZIC${p.suggestedStudent ? ` (login dziecka: ${escapeHtml(p.suggestedStudent)})` : ""}</span>`;
+        detailsHtml = `Rodzic: <code>${escapeHtml(p.parentUsername)}</code> · brak połączonego konta dziecka`;
+      } else {
+        modeBadge = `<span class="badge badge-info">TYLKO DZIECKO / UCZEŃ${p.suggestedParent ? ` (login rodzica: ${escapeHtml(p.suggestedParent)})` : ""}</span>`;
+        detailsHtml = `Dziecko (uczeń): <code>${escapeHtml(p.studentUsername)}</code> · brak połączonego konta rodzica`;
+      }
+
+      if (p.className) {
+        detailsHtml = `KLASA ${escapeHtml(p.className)} · ` + detailsHtml;
+      }
+
+      if (p.isLocal) {
+        const unpairChildBtn =
+          p.hasParent && p.hasChild
+            ? `<button class="btn-outline btn-xs unpair-local-child-btn" data-alias="${escapeHtml(p.alias)}" type="button" title="Zostaw tylko konto rodzica">Odłącz dziecko</button>`
+            : "";
+        const unpairParentBtn =
+          p.hasParent && p.hasChild
+            ? `<button class="btn-outline btn-xs unpair-local-parent-btn" data-alias="${escapeHtml(p.alias)}" type="button" title="Zostaw tylko konto dziecka">Odłącz rodzica</button>`
+            : "";
+        actionsHtml = `
+          <div style="display:inline-flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;">
+            ${unpairChildBtn}
+            ${unpairParentBtn}
+            <button class="btn-outline btn-xs remove-acc-btn" data-alias="${escapeHtml(p.alias)}" type="button">Usuń profil</button>
+          </div>
         `;
-      }).join("")
-    : localAccounts.map((acc) => {
-        const hasChild = Boolean(acc.student_username);
-        const childBadge = hasChild
-          ? `<span class="badge badge-now">RODZIC + UCZEŃ (${escapeHtml(acc.student_username)})</span>`
-          : `<span class="badge badge-sub">TYLKO RODZIC</span>`;
-        return `
-          <tr>
-            <td style="width:140px;"><span class="badge badge-info">INDEXEDDB VAULT</span></td>
-            <td style="width:200px;"><span class="cell-primary">${escapeHtml(acc.label)}</span></td>
-            <td style="width:110px;"><code>${escapeHtml(acc.alias)}</code></td>
-            <td>
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                <span>Rodzic: <code>${escapeHtml(acc.login)}</code> · AES-GCM 256-bit</span>
-                ${childBadge}
-              </div>
-            </td>
-            <td style="width:140px;text-align:right;">
-              <button class="btn-outline btn-xs remove-acc-btn" data-alias="${escapeHtml(acc.alias)}" type="button">Usuń</button>
-            </td>
-          </tr>
-        `;
-      }).join("");
+      } else {
+        actionsHtml =
+          p.hasParent && p.hasChild
+            ? `<button class="btn-outline btn-xs unpair-child-btn" data-alias="${escapeHtml(p.alias)}" type="button">Odłącz dziecko</button>`
+            : `<span class="cell-secondary">AKTYWNE</span>`;
+      }
+
+      return `
+        <tr>
+          <td style="width:140px;">
+            <span class="badge ${p.isLocal ? "badge-info" : "badge-now"}">${p.isLocal ? "INDEXEDDB VAULT" : "SERWER DOMOWY"}</span>
+          </td>
+          <td style="width:190px;"><span class="cell-primary">${escapeHtml(p.displayName)}</span></td>
+          <td style="width:100px;"><code>${escapeHtml(p.alias)}</code></td>
+          <td>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span>${detailsHtml}</span>
+              ${modeBadge}
+            </div>
+          </td>
+          <td style="width:220px;text-align:right;">
+            ${actionsHtml}
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
 
   const icsRowsHtml = [];
   Object.entries(activeLinks).forEach(([alias, f]) => {
@@ -2330,59 +2399,93 @@ async function renderVaultAndCalendarModule() {
     `);
   });
 
-  const profileSelectOptions = state.profiles.map((p) => {
-    const alias = p.alias || p.account;
-    const selected = alias === state.activeAccount ? "selected" : "";
-    return `<option value="${escapeHtml(alias)}" data-suggested="${escapeHtml(p.suggested_student_username || "")}" ${selected}>Profil: ${escapeHtml(p.first_name || alias)} (${escapeHtml(alias)})</option>`;
-  }).join("");
+  const hasConfiguredProfiles = unifiedProfiles.length > 0;
+  const initialPairRole =
+    activeProfileObj && !activeProfileObj.hasParent && activeProfileObj.hasChild
+      ? "parent"
+      : "student";
+
+  const profileSelectOptions = unifiedProfiles
+    .map((p) => {
+      const selected = activeProfileObj && p.alias === activeProfileObj.alias ? "selected" : "";
+      const modeTag =
+        p.hasParent && p.hasChild
+          ? "Rodzic + Dziecko"
+          : p.hasParent
+            ? "Tylko Rodzic"
+            : "Tylko Dziecko";
+      return `<option value="${escapeHtml(p.alias)}" data-has-parent="${p.hasParent ? "1" : "0"}" data-has-child="${p.hasChild ? "1" : "0"}" data-suggested-student="${escapeHtml(p.suggestedStudent)}" data-suggested-parent="${escapeHtml(p.suggestedParent)}" ${selected}>Profil: ${escapeHtml(p.displayName)} (${escapeHtml(modeTag)})</option>`;
+    })
+    .join("");
 
   wrapper.innerHTML = `
-    <!-- Section 1: Accounts Table + Child Account Pairing + Vault Add Row -->
+    <!-- Section 1: Step 1 (Create Profile) -> Profiles Table -> Step 2 (Pair Second Account, shown when profiles > 0) -->
     <div class="surface-panel content-card data-table-card">
       <div class="pi-action-bar" style="border-left:0;border-right:0;border-top:0;">
-        <span class="toolbar-title" style="font-size:12px;">KONTA LIBRUS SYNERGIA (RODZIC + UCZEŃ)</span>
-        <span class="pi-counter">${localAccounts.length || state.profiles.length} PROFILI</span>
+        <span class="toolbar-title" style="font-size:12px;">KONTA LIBRUS SYNERGIA (RODZIC / DZIECKO)</span>
+        <span class="pi-counter">${unifiedProfiles.length} PROFILI</span>
       </div>
+
+      <!-- STEP 1: Add New Profile (Parent + Child, Parent only, or Child only) -->
+      <div class="pi-action-bar" style="border-left:0;border-right:0;background:var(--bg-subtle);flex-direction:column;align-items:stretch;gap:8px;padding:12px 14px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+          <span class="toolbar-title" style="font-size:11px;color:var(--accent-primary);">KROK 1 · ZAŁÓŻ NOWY PROFIL (MOŻESZ PODAĆ KONTO RODZICA, KONTO DZIECKA LUB OBA NARAZ):</span>
+          <span class="card-subtitle">Login rodzica nie ma litery „u” (np. <code>8090546</code>), a login dziecka ma końcówkę „u” (np. <code>8090546u</code>).</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <input id="vaultLabelInput" class="input-field" style="max-width:135px;" placeholder="Imię (np. Ola)" />
+          <input id="vaultAliasInput" class="input-field" style="max-width:105px;" placeholder="Alias (opcj.)" />
+          <input id="vaultLoginInput" class="input-field" style="max-width:175px;" placeholder="Login rodzica (np. 8090546)" />
+          <input id="vaultPasswordInput" type="password" class="input-field" style="max-width:145px;" placeholder="Hasło rodzica" />
+          <input id="vaultStudentLoginInput" class="input-field" style="max-width:185px;" placeholder="Login dziecka (np. 8090546u)" />
+          <input id="vaultStudentPasswordInput" type="password" class="input-field" style="max-width:145px;" placeholder="Hasło dziecka" />
+          <button id="saveVaultAccountBtn" class="action-button" type="button" style="margin-left:auto;">+ Załóż profil</button>
+        </div>
+        <div id="vaultLoginHintBar" style="display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:6px 10px;border-radius:4px;border:1px solid var(--accent-amber);background:rgba(245, 158, 11, 0.12);font-size:11.5px;">
+          <span id="vaultLoginHintText" style="color:var(--text-primary);font-weight:500;"></span>
+          <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
+            <button id="vaultMoveToChildBtn" class="btn-primary btn-xs" type="button" style="display:none;">Przenieś do pól dziecka (ucznia) →</button>
+            <button id="vaultAppendUBtn" class="btn-primary btn-xs" type="button" style="display:none;">Dopisz „u” na końcu loginu dziecka</button>
+            <button id="vaultMoveToParentBtn" class="btn-outline btn-xs" type="button" style="display:none;">← Przenieś do pól rodzica</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Configured Profiles Table -->
       <div class="data-table-scroll">
         <table class="data-table">
           <thead>
             <tr>
               <th>ŹRÓDŁO</th>
-              <th>UCZEŃ / ETYKIETA</th>
+              <th>PROFIL / UCZEŃ</th>
               <th>ALIAS</th>
-              <th>STATUS POŁĄCZENIA (KONTO RODZICA + KONTO DZIECKA)</th>
+              <th>STATUS POŁĄCZENIA (KONTO RODZICA / KONTO DZIECKA)</th>
               <th style="text-align:right;">AKCJA</th>
             </tr>
           </thead>
           <tbody>
-            ${accountRowsHtml || `<tr><td colspan="5">Brak skonfigurowanych kont. Dodaj konto poniżej.</td></tr>`}
+            ${accountRowsHtml || `<tr><td colspan="5">Brak skonfigurowanych profili. Załóż pierwszy profil w <strong>KROKU 1</strong> powyżej (podając dane rodzica, dziecka lub oba konta).</td></tr>`}
           </tbody>
         </table>
       </div>
 
-      <!-- Dedicated Child Account Pairing Bar -->
-      <div class="pi-action-bar" style="border-left:0;border-right:0;background:var(--bg-subtle);flex-wrap:wrap;gap:8px;">
-        <span class="toolbar-title" style="font-size:11px;color:var(--accent-primary);">POŁĄCZ KONTO DZIECKA (UCZNIA):</span>
-        <select id="studentPairProfileSelect" class="pi-select" style="min-width:170px;">
+      ${hasConfiguredProfiles ? `
+      <!-- STEP 2: Pair Missing Child or Parent Account to an Existing Profile -->
+      <div class="pi-action-bar" style="border-left:0;border-right:0;border-bottom:0;flex-wrap:wrap;gap:8px;padding:10px 14px;">
+        <span id="pairBarTitle" class="toolbar-title" style="font-size:11px;color:var(--accent-primary);">KROK 2 (OPCJONALNIE) · DOŁĄCZ DRUGIE KONTO DO PROFILU:</span>
+        <select id="studentPairProfileSelect" class="pi-select" style="min-width:190px;">
           ${profileSelectOptions}
         </select>
-        <input id="studentPairLoginInput" class="input-field" style="max-width:190px;" placeholder="Login ucznia (np. 8090546)" value="${escapeHtml(defaultSuggestedStudent)}" />
-        <input id="studentPairPasswordInput" type="password" class="input-field" style="max-width:190px;" placeholder="Hasło ucznia do Librusa" />
-        <button id="saveStudentPairBtn" class="btn-primary btn-xs" type="button">+ Połącz konto ucznia (pobieraj wymagania dla dzieci)</button>
-        <span id="studentPairStatusMsg" class="card-subtitle" style="margin-left:auto;">Login ucznia to zazwyczaj numer bez litery „u” na końcu (rodzic ma „u”).</span>
+        <select id="studentPairRoleSelect" class="pi-select" style="min-width:185px;">
+          <option value="student" ${initialPairRole === "student" ? "selected" : ""}>Połącz konto dziecka (z „u”)</option>
+          <option value="parent" ${initialPairRole === "parent" ? "selected" : ""}>Połącz konto rodzica (bez „u”)</option>
+        </select>
+        <input id="studentPairLoginInput" class="input-field" style="max-width:195px;" placeholder="Login" value="" />
+        <input id="studentPairPasswordInput" type="password" class="input-field" style="max-width:180px;" placeholder="Hasło do Librusa" />
+        <button id="saveStudentPairBtn" class="btn-primary btn-xs" type="button">+ Połącz konto</button>
+        <span id="studentPairStatusMsg" class="card-subtitle" style="margin-left:auto;"></span>
       </div>
-
-      <!-- Add New Full Account Row -->
-      <div class="pi-action-bar" style="border-left:0;border-right:0;border-bottom:0;">
-        <span class="card-subtitle" style="white-space:nowrap;">NOWY PROFIL (VAULT):</span>
-        <input id="vaultLabelInput" class="input-field" style="max-width:130px;" placeholder="Imię (np. Ola)" />
-        <input id="vaultAliasInput" class="input-field" style="max-width:110px;" placeholder="Alias (np. ola)" />
-        <input id="vaultLoginInput" class="input-field" style="max-width:155px;" placeholder="Login rodzica (np. 8090546)" />
-        <input id="vaultPasswordInput" type="password" class="input-field" style="max-width:145px;" placeholder="Hasło rodzica" />
-        <input id="vaultStudentLoginInput" class="input-field" style="max-width:155px;" placeholder="Login ucznia (np. 8090546u)" />
-        <input id="vaultStudentPasswordInput" type="password" class="input-field" style="max-width:145px;" placeholder="Hasło ucznia (opcj.)" />
-        <button id="saveVaultAccountBtn" class="action-button" type="button" style="margin-left:auto;">+ Zapisz profil</button>
-      </div>
+      ` : ""}
     </div>
 
     <!-- Section 2: iCal Feeds & Kiosk / Nest Hub Display Link -->
@@ -2426,27 +2529,162 @@ async function renderVaultAndCalendarModule() {
   els.contentArea.innerHTML = "";
   els.contentArea.appendChild(wrapper);
 
-  // Update suggested student login when profile select changes
-  const pairSelect = document.getElementById("studentPairProfileSelect");
-  const pairLoginInput = document.getElementById("studentPairLoginInput");
-  if (pairSelect && pairLoginInput) {
-    pairSelect.onchange = () => {
-      const opt = pairSelect.options[pairSelect.selectedIndex];
-      const suggested = opt ? opt.getAttribute("data-suggested") : "";
-      if (suggested) pairLoginInput.value = suggested;
-    };
-  }
+  // Step 1: Suffix 'u' live detection & field swap helpers
+  const vaultLoginInput = document.getElementById("vaultLoginInput");
+  const vaultPasswordInput = document.getElementById("vaultPasswordInput");
+  const vaultStudentLoginInput = document.getElementById("vaultStudentLoginInput");
+  const vaultStudentPasswordInput = document.getElementById("vaultStudentPasswordInput");
+  const vaultLoginHintBar = document.getElementById("vaultLoginHintBar");
+  const vaultLoginHintText = document.getElementById("vaultLoginHintText");
+  const vaultMoveToChildBtn = document.getElementById("vaultMoveToChildBtn");
+  const vaultAppendUBtn = document.getElementById("vaultAppendUBtn");
+  const vaultMoveToParentBtn = document.getElementById("vaultMoveToParentBtn");
 
-  // Bind Student Account Pairing button
+  const evaluateStep1LoginFields = () => {
+    const parentLogin = (vaultLoginInput.value || "").trim();
+    const childLogin = (vaultStudentLoginInput.value || "").trim();
+    vaultMoveToChildBtn.style.display = "none";
+    vaultAppendUBtn.style.display = "none";
+    vaultMoveToParentBtn.style.display = "none";
+
+    // Case A: User entered a child login (ending with 'u', e.g. 8090546u) in the Parent login field
+    if (parentLogin && /u$/i.test(parentLogin)) {
+      vaultLoginHintBar.style.display = "flex";
+      vaultLoginHintText.textContent = `W polu „Login rodzica” wpisano login z końcówką „u” (${parentLogin}) — to login konta dziecka (ucznia). Przenieś go do pól dziecka:`;
+      vaultMoveToChildBtn.style.display = "inline-flex";
+      return "parent_has_u";
+    }
+
+    // Case B: User entered a numeric login without 'u' in the Child login field
+    if (childLogin && !/u$/i.test(childLogin)) {
+      vaultLoginHintBar.style.display = "flex";
+      vaultLoginHintText.textContent = `W polu „Login dziecka” wpisano login bez końcówki „u” (${childLogin}) — konto dziecka w Librusie kończy się literą „u” (np. ${childLogin}u), natomiast konto rodzica nie ma „u”:`;
+      vaultAppendUBtn.style.display = "inline-flex";
+      if (!parentLogin) {
+        vaultMoveToParentBtn.style.display = "inline-flex";
+      }
+      return "child_missing_u";
+    }
+
+    // Case C: Auto-suggest child login placeholder when parent login is typed
+    if (parentLogin && !childLogin) {
+      vaultStudentLoginInput.placeholder = `Login dziecka (np. ${parentLogin.replace(/u$/i, "")}u)`;
+    } else {
+      vaultStudentLoginInput.placeholder = "Login dziecka (np. 8090546u)";
+    }
+
+    vaultLoginHintBar.style.display = "none";
+    return "ok";
+  };
+
+  vaultLoginInput.addEventListener("input", evaluateStep1LoginFields);
+  vaultStudentLoginInput.addEventListener("input", evaluateStep1LoginFields);
+
+  vaultMoveToChildBtn.onclick = () => {
+    const pLogin = vaultLoginInput.value.trim();
+    const pPass = vaultPasswordInput.value;
+    if (pLogin) vaultStudentLoginInput.value = pLogin;
+    if (pPass && !vaultStudentPasswordInput.value) {
+      vaultStudentPasswordInput.value = pPass;
+    }
+    vaultLoginInput.value = "";
+    vaultPasswordInput.value = "";
+    evaluateStep1LoginFields();
+    vaultStudentPasswordInput.focus();
+    showToast("Przeniesiono dane logowania do pól konta dziecka (ucznia).");
+  };
+
+  vaultAppendUBtn.onclick = () => {
+    const cLogin = vaultStudentLoginInput.value.trim();
+    if (cLogin && !/u$/i.test(cLogin)) {
+      vaultStudentLoginInput.value = `${cLogin}u`;
+    }
+    evaluateStep1LoginFields();
+    vaultStudentPasswordInput.focus();
+  };
+
+  vaultMoveToParentBtn.onclick = () => {
+    const cLogin = vaultStudentLoginInput.value.trim();
+    const cPass = vaultStudentPasswordInput.value;
+    if (cLogin) vaultLoginInput.value = cLogin;
+    if (cPass && !vaultPasswordInput.value) {
+      vaultPasswordInput.value = cPass;
+    }
+    vaultStudentLoginInput.value = "";
+    vaultStudentPasswordInput.value = "";
+    evaluateStep1LoginFields();
+    vaultPasswordInput.focus();
+    showToast("Przeniesiono dane logowania do pól konta rodzica.");
+  };
+
+  // Step 2: Dynamic Pairing Bar (Child or Parent account)
+  const pairSelect = document.getElementById("studentPairProfileSelect");
+  const pairRoleSelect = document.getElementById("studentPairRoleSelect");
+  const pairLoginInput = document.getElementById("studentPairLoginInput");
+  const pairPasswordInput = document.getElementById("studentPairPasswordInput");
   const saveStudentPairBtn = document.getElementById("saveStudentPairBtn");
   const pairStatusMsg = document.getElementById("studentPairStatusMsg");
+
+  const syncPairBarUi = (updateRoleFromProfile = false) => {
+    if (!pairSelect || !pairRoleSelect || !pairLoginInput || !saveStudentPairBtn) return;
+    const opt = pairSelect.options[pairSelect.selectedIndex];
+    const hasParent = opt ? opt.getAttribute("data-has-parent") === "1" : true;
+    const hasChild = opt ? opt.getAttribute("data-has-child") === "1" : false;
+    const suggestedStudent = (opt && opt.getAttribute("data-suggested-student")) || "";
+    const suggestedParent = (opt && opt.getAttribute("data-suggested-parent")) || "";
+
+    if (updateRoleFromProfile) {
+      if (!hasParent && hasChild) {
+        pairRoleSelect.value = "parent";
+      } else {
+        pairRoleSelect.value = "student";
+      }
+    }
+
+    const role = pairRoleSelect.value;
+    if (role === "parent") {
+      pairLoginInput.placeholder = "Login rodzica (bez „u”, np. 8090546)";
+      pairLoginInput.value = suggestedParent;
+      if (pairPasswordInput) pairPasswordInput.placeholder = "Hasło rodzica do Librusa";
+      saveStudentPairBtn.textContent = "+ Połącz konto rodzica";
+      if (pairStatusMsg) {
+        pairStatusMsg.style.color = "var(--text-secondary)";
+        pairStatusMsg.textContent = "Login rodzica to numer bez litery „u” na końcu.";
+      }
+    } else {
+      pairLoginInput.placeholder = "Login dziecka (z „u”, np. 8090546u)";
+      pairLoginInput.value = suggestedStudent;
+      if (pairPasswordInput) pairPasswordInput.placeholder = "Hasło dziecka do Librusa";
+      saveStudentPairBtn.textContent = "+ Połącz konto dziecka (ucznia)";
+      if (pairStatusMsg) {
+        pairStatusMsg.style.color = "var(--text-secondary)";
+        pairStatusMsg.textContent = "Login dziecka ma literę „u” na końcu (np. 8090546u).";
+      }
+    }
+  };
+
+  if (pairSelect && pairRoleSelect) {
+    syncPairBarUi(true);
+    pairSelect.onchange = () => syncPairBarUi(true);
+    pairRoleSelect.onchange = () => syncPairBarUi(false);
+  }
+
   if (saveStudentPairBtn) {
     saveStudentPairBtn.onclick = async () => {
-      const targetAlias = (pairSelect && pairSelect.value) || state.activeAccount || (state.profiles[0] && state.profiles[0].alias) || "";
-      const studentUsername = pairLoginInput ? pairLoginInput.value.trim() : "";
-      const studentPassword = document.getElementById("studentPairPasswordInput").value;
-      if (!studentUsername || !studentPassword) {
-        const msg = "Podaj login ucznia (zwykle bez litery 'u' na końcu) oraz hasło ucznia.";
+      const targetAlias =
+        (pairSelect && pairSelect.value) ||
+        state.activeAccount ||
+        (unifiedProfiles[0] && unifiedProfiles[0].alias) ||
+        "";
+      const role = pairRoleSelect ? pairRoleSelect.value : "student";
+      const enteredLogin = pairLoginInput ? pairLoginInput.value.trim() : "";
+      const enteredPassword = pairPasswordInput ? pairPasswordInput.value : "";
+
+      if (!enteredLogin || !enteredPassword) {
+        const msg =
+          role === "parent"
+            ? "Podaj login rodzica (bez litery 'u') oraz hasło rodzica."
+            : "Podaj login dziecka (z literą 'u' na końcu) oraz hasło dziecka.";
         if (pairStatusMsg) {
           pairStatusMsg.style.color = "var(--accent-rose)";
           pairStatusMsg.textContent = msg;
@@ -2454,36 +2692,82 @@ async function renderVaultAndCalendarModule() {
         showToast(msg);
         return;
       }
+
+      if (role === "parent" && /u$/i.test(enteredLogin)) {
+        const msg = `Login „${enteredLogin}” ma końcówkę „u” (to konto dziecka). Wpisz login rodzica bez „u” lub zmień opcję na „Połącz konto dziecka”.`;
+        if (pairStatusMsg) {
+          pairStatusMsg.style.color = "var(--accent-rose)";
+          pairStatusMsg.textContent = msg;
+        }
+        showToast(msg, 5500);
+        return;
+      }
+
+      if (role === "student" && !/u$/i.test(enteredLogin)) {
+        const msg = `Login dziecka w Librusie kończy się literą „u” (np. ${enteredLogin}u). Sprawdź login lub przełącz na „Połącz konto rodzica”.`;
+        if (pairStatusMsg) {
+          pairStatusMsg.style.color = "var(--accent-rose)";
+          pairStatusMsg.textContent = msg;
+        }
+        showToast(msg, 5500);
+        return;
+      }
+
       saveStudentPairBtn.disabled = true;
-      saveStudentPairBtn.textContent = "Weryfikacja logowania ucznia...";
+      saveStudentPairBtn.textContent =
+        role === "parent" ? "Weryfikacja konta rodzica..." : "Weryfikacja konta dziecka...";
       if (pairStatusMsg) {
         pairStatusMsg.style.color = "var(--accent-primary)";
-        pairStatusMsg.textContent = `Łączenie i weryfikacja konta ucznia (${studentUsername})...`;
+        pairStatusMsg.textContent = `Łączenie i weryfikacja konta (${enteredLogin})...`;
       }
       try {
+        const payload =
+          role === "parent"
+            ? {
+                alias: targetAlias,
+                account: targetAlias,
+                parent_username: enteredLogin,
+                parent_password: enteredPassword,
+                verify: true,
+              }
+            : {
+                alias: targetAlias,
+                account: targetAlias,
+                student_username: enteredLogin,
+                student_password: enteredPassword,
+                verify: true,
+              };
+
         await apiFetch("/api/vault/student-account", {
           method: "POST",
-          body: {
-            alias: targetAlias,
-            account: targetAlias,
-            student_username: studentUsername,
-            student_password: studentPassword,
-            verify: true,
-          },
+          body: payload,
         });
-        // Also update IndexedDB Vault if this alias exists there
+
+        // Update IndexedDB Vault if this alias exists there
         if (window.LibrusVault) {
           const memAccs = window.LibrusVault.getMemoryAccounts();
           const matching = memAccs.find((a) => a.alias === targetAlias);
           if (matching) {
-            await window.LibrusVault.addOrUpdateAccount({
-              ...matching,
-              student_username: studentUsername,
-              student_password: studentPassword,
-            });
+            if (role === "parent") {
+              await window.LibrusVault.addOrUpdateAccount({
+                ...matching,
+                login: enteredLogin,
+                password: enteredPassword,
+              });
+            } else {
+              await window.LibrusVault.addOrUpdateAccount({
+                ...matching,
+                student_username: enteredLogin,
+                student_password: enteredPassword,
+              });
+            }
           }
         }
-        showToast(`Połączono konto ucznia (${studentUsername}) z profilem ${targetAlias}!`);
+        showToast(
+          role === "parent"
+            ? `Połączono konto rodzica (${enteredLogin}) z profilem ${targetAlias}!`
+            : `Połączono konto dziecka (${enteredLogin}) z profilem ${targetAlias}!`
+        );
         await bootstrapProfiles();
         await renderVaultAndCalendarModule();
       } catch (err) {
@@ -2491,15 +2775,15 @@ async function renderVaultAndCalendarModule() {
           pairStatusMsg.style.color = "var(--accent-rose)";
           pairStatusMsg.textContent = `Błąd: ${err.message}`;
         }
-        showToast(`Błąd łączenia konta ucznia: ${err.message}`, 5500);
+        showToast(`Błąd łączenia konta: ${err.message}`, 5500);
       } finally {
         saveStudentPairBtn.disabled = false;
-        saveStudentPairBtn.textContent = "+ Połącz konto ucznia (pobieraj wymagania dla dzieci)";
+        syncPairBarUi(false);
       }
     };
   }
 
-  // Bind unpair child account button
+  // Bind unpair child account button (Server / .env mode)
   wrapper.querySelectorAll(".unpair-child-btn").forEach((btn) => {
     btn.onclick = async () => {
       const alias = btn.dataset.alias;
@@ -2508,7 +2792,7 @@ async function renderVaultAndCalendarModule() {
           method: "POST",
           body: { alias, account: alias, student_username: "", student_password: "", verify: false },
         });
-        showToast(`Odłączono konto ucznia od profilu ${alias}.`);
+        showToast(`Odłączono konto dziecka od profilu ${alias}.`);
         await bootstrapProfiles();
         await renderVaultAndCalendarModule();
       } catch (err) {
@@ -2517,27 +2801,107 @@ async function renderVaultAndCalendarModule() {
     };
   });
 
-  // Bind Vault events
+  // Bind unpair child / parent buttons (IndexedDB Vault mode)
+  wrapper.querySelectorAll(".unpair-local-child-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const alias = btn.dataset.alias;
+      const memAccs = window.LibrusVault.getMemoryAccounts();
+      const matching = memAccs.find((a) => a.alias === alias);
+      if (matching) {
+        await window.LibrusVault.addOrUpdateAccount({
+          ...matching,
+          student_username: "",
+          student_password: "",
+        });
+        showToast(`Odłączono konto dziecka od profilu ${alias}.`);
+        await bootstrapProfiles();
+        await renderVaultAndCalendarModule();
+      }
+    };
+  });
+
+  wrapper.querySelectorAll(".unpair-local-parent-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const alias = btn.dataset.alias;
+      const memAccs = window.LibrusVault.getMemoryAccounts();
+      const matching = memAccs.find((a) => a.alias === alias);
+      if (matching && matching.student_username && matching.student_password) {
+        await window.LibrusVault.addOrUpdateAccount({
+          ...matching,
+          login: matching.student_username,
+          password: matching.student_password,
+        });
+        showToast(`Odłączono konto rodzica od profilu ${alias} (pozostawiono konto dziecka).`);
+        await bootstrapProfiles();
+        await renderVaultAndCalendarModule();
+      }
+    };
+  });
+
+  // Bind Step 1 Vault Save button (supports Parent+Child, Parent-Only, or Child-Only)
   document.getElementById("saveVaultAccountBtn").onclick = async () => {
     const label = document.getElementById("vaultLabelInput").value.trim();
-    const alias = document.getElementById("vaultAliasInput").value.trim() || label;
-    const login = document.getElementById("vaultLoginInput").value.trim();
-    const password = document.getElementById("vaultPasswordInput").value;
-    const student_username = document.getElementById("vaultStudentLoginInput").value.trim();
-    const student_password = document.getElementById("vaultStudentPasswordInput").value;
-    if (!login || !password) {
-      showToast("Podaj login i hasło do konta Librus Synergia.");
+    const login = vaultLoginInput.value.trim();
+    const password = vaultPasswordInput.value;
+    const student_username = vaultStudentLoginInput.value.trim();
+    const student_password = vaultStudentPasswordInput.value;
+
+    // 1. Prevent child login (suffix 'u') in the Parent login field
+    if (login && /u$/i.test(login)) {
+      evaluateStep1LoginFields();
+      showToast(
+        `Login „${login}” kończy się literą „u” — to konto dziecka! Kliknij przycisk „Przenieś do pól dziecka (ucznia) →”.`,
+        5500
+      );
       return;
     }
+
+    // 2. Prevent parent login (missing suffix 'u') in the Child login field
+    if (student_username && !/u$/i.test(student_username)) {
+      evaluateStep1LoginFields();
+      showToast(
+        `Login dziecka „${student_username}” nie ma końcówki „u”. Dopisz „u” lub przenieś dane do pól rodzica.`,
+        5500
+      );
+      return;
+    }
+
+    // 3. Validate partial credentials
+    if ((login && !password) || (!login && password)) {
+      showToast("Podaj zarówno login, jak i hasło rodzica (lub zostaw oba pola rodzica puste).");
+      return;
+    }
+    if ((student_username && !student_password) || (!student_username && student_password)) {
+      showToast("Podaj zarówno login, jak i hasło dziecka (lub zostaw oba pola dziecka puste).");
+      return;
+    }
+
+    const hasParentCreds = Boolean(login && password);
+    const hasStudentCreds = Boolean(student_username && student_password);
+
+    if (!hasParentCreds && !hasStudentCreds) {
+      showToast("Podaj dane logowania rodzica, dane logowania dziecka (ucznia) lub oba konta naraz.");
+      return;
+    }
+
+    const fallbackLabel = label || login || student_username;
+    const alias = document.getElementById("vaultAliasInput").value.trim() || fallbackLabel;
+
     await window.LibrusVault.addOrUpdateAccount({
       alias,
-      label,
+      label: fallbackLabel,
       login,
       password,
       student_username,
       student_password,
     });
-    showToast("Konto zostało zaszyfrowane i zapisane w przeglądarce!");
+    const modeLabel =
+      hasParentCreds && hasStudentCreds
+        ? "Rodzic + Dziecko"
+        : hasParentCreds
+          ? "Tylko Rodzic"
+          : "Tylko Dziecko (Uczeń)";
+    showToast(`Założono profil (${modeLabel}) i zaszyfrowano w przeglądarce!`);
     await bootstrapProfiles();
     await renderVaultAndCalendarModule();
   };

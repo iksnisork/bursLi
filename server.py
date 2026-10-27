@@ -576,6 +576,8 @@ class DashboardServer:
         alias = str(body.get("alias") or body.get("account") or "").strip()
         student_username = str(body.get("student_username") or "").strip()
         student_password = str(body.get("student_password") or "")
+        parent_username = str(body.get("parent_username") or "").strip()
+        parent_password = str(body.get("parent_password") or "")
         verify_now = bool(body.get("verify", True))
 
         if not alias:
@@ -589,12 +591,20 @@ class DashboardServer:
 
         try:
             student_info: dict[str, Any] = {}
-            if student_username and student_password and verify_now:
+            if parent_username and parent_password and verify_now:
+                student_info = await self.hub.verify_student_account(
+                    parent_username, parent_password
+                )
+            elif student_username and student_password and verify_now:
                 student_info = await self.hub.verify_student_account(
                     student_username, student_password
                 )
 
-            if not os.environ.get("K_SERVICE") and self.hub.local_config_path.exists():
+            if (
+                not os.environ.get("K_SERVICE")
+                and self.hub.local_config_path.exists()
+                and not (parent_username and parent_password)
+            ):
                 save_local_student_account(
                     self.hub.local_config_path,
                     alias,

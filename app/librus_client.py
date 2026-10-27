@@ -377,7 +377,11 @@ class StatelessLibrusHub:
                     password=SecretStr(acc.password),
                 )
                 backends[acc.alias] = mb
-                if acc.student_username and acc.student_password:
+                if (
+                    acc.student_username
+                    and acc.student_password
+                    and acc.student_username != acc.username
+                ):
                     student_key = f"{acc.alias}__student"
                     creds_map[student_key] = AccountCredentials(
                         login=SecretStr(acc.student_username),
@@ -455,7 +459,7 @@ class StatelessLibrusHub:
         except Exception as exc:
             logger.warning("Student account verification failed: %s", type(exc).__name__)
             raise ValueError(
-                "Nie udało się zalogować na konto ucznia. Sprawdź login ucznia (zwykle bez litery 'u' na końcu) oraz hasło."
+                "Nie udało się zalogować do Librus Synergia. Sprawdź login (uczeń ma literę 'u' na końcu, rodzic bez 'u') oraz hasło."
             ) from exc
         finally:
             await self._safe_close_service(service)
@@ -478,10 +482,26 @@ class StatelessLibrusHub:
 
         async def _load_one(acc: SealedAccount) -> dict[str, Any]:
             client = entry.service.account(acc.alias)
-            suggested_student = (
-                f"{acc.username}u"
-                if acc.username and not acc.username.lower().endswith("u")
-                else (acc.username[:-1] if acc.username else "")
+            is_student_only = bool(
+                acc.student_username
+                and acc.student_password
+                and acc.username == acc.student_username
+            )
+            has_parent = not is_student_only and bool(acc.username and acc.password)
+            has_student = bool(acc.student_username and acc.student_password)
+            parent_username = "" if is_student_only else acc.username
+            student_username = acc.student_username or ""
+            base_num = (
+                acc.username[:-1]
+                if acc.username and acc.username.lower().endswith("u")
+                else acc.username
+            )
+            suggested_student = f"{base_num}u" if base_num else ""
+            suggested_parent = base_num if base_num else ""
+            account_mode = (
+                "both"
+                if (has_parent and has_student)
+                else ("student_only" if is_student_only else "parent_only")
             )
             try:
                 info = await client.student_information(max_age_seconds=300.0)
@@ -509,10 +529,13 @@ class StatelessLibrusHub:
                     "educator": str(info.tutor or "").strip(),
                     "school": school_lines[0] if school_lines else "",
                     "lucky_number": lucky_num,
-                    "parent_username": acc.username,
-                    "has_student_account": bool(acc.student_username and acc.student_password),
-                    "student_username": acc.student_username or "",
+                    "parent_username": parent_username,
+                    "has_parent_account": has_parent,
+                    "has_student_account": has_student,
+                    "student_username": student_username,
                     "suggested_student_username": suggested_student,
+                    "suggested_parent_username": suggested_parent,
+                    "account_mode": account_mode,
                 }
             except Exception as exc:
                 logger.warning("Failed to load student_information for %s: %s", acc.alias, exc)
@@ -527,10 +550,13 @@ class StatelessLibrusHub:
                     "educator": "",
                     "school": "",
                     "lucky_number": None,
-                    "parent_username": acc.username,
-                    "has_student_account": bool(acc.student_username and acc.student_password),
-                    "student_username": acc.student_username or "",
+                    "parent_username": parent_username,
+                    "has_parent_account": has_parent,
+                    "has_student_account": has_student,
+                    "student_username": student_username,
                     "suggested_student_username": suggested_student,
+                    "suggested_parent_username": suggested_parent,
+                    "account_mode": account_mode,
                 }
 
         profiles: list[dict[str, Any]] = []
@@ -687,6 +713,18 @@ class StatelessLibrusHub:
             for a in vault.accounts
         )
 
+    @staticmethod
+    def _is_student_only_account(vault: UnsealedVaultPayload, alias: str) -> bool:
+        return any(
+            a.alias == alias
+            and bool(
+                a.student_username
+                and a.student_password
+                and a.username == a.student_username
+            )
+            for a in vault.accounts
+        )
+
     async def _fetch_merged_messages_with_excerpts(
         self,
         entry: PooledServiceEntry,
@@ -696,9 +734,10 @@ class StatelessLibrusHub:
         limit: int = 30,
     ) -> list[dict[str, Any]]:
         """Fetch recent messages from parent account and (if configured) student account, merging & tagging."""
+        primary_source = "uczeń" if self._is_student_only_account(vault, alias) else "rodzic"
         tasks = [
             self._fetch_recent_messages_with_excerpts(
-                entry, alias, limit=limit, account_source="rodzic"
+                entry, alias, limit=limit, account_source=primary_source
             )
         ]
         student_key = f"{alias}__student"
@@ -1666,12 +1705,13 @@ class StatelessLibrusHub:
         msg_folder = MessageFolder.SENT if folder == "sent" else MessageFolder.RECEIVED
         backend = entry.backends.get(alias, MessagingBackend.MODERN)
 
+        primary_source = "uczeń" if self._is_student_only_account(vault, alias) else "rodzic"
         tasks: list[Any] = [
             self._list_messages_for_account_key(
                 entry,
                 alias,
                 msg_folder,
-                account_source="rodzic",
+                account_source=primary_source,
                 unread_only=unread_only,
                 limit=limit,
                 force=force,
@@ -1939,12 +1979,13 @@ class StatelessLibrusHub:
         student_key = f"{alias}__student"
         has_student = student_key in entry.backends
 
+        primary_source = "uczeń" if self._is_student_only_account(vault, alias) else "rodzic"
         if account_source == "uczeń" and has_student:
-            candidates = [(student_key, "uczeń"), (alias, "rodzic")]
+            candidates = [(student_key, "uczeń"), (alias, primary_source)]
         elif has_student:
-            candidates = [(alias, "rodzic"), (student_key, "uczeń")]
+            candidates = [(alias, primary_source), (student_key, "uczeń")]
         else:
-            candidates = [(alias, "rodzic")]
+            candidates = [(alias, primary_source)]
 
         last_exc: Exception | None = None
         for t_key, src_label in candidates:
