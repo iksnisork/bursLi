@@ -2400,26 +2400,44 @@ async function renderVaultAndCalendarModule() {
   });
 
   const hasConfiguredProfiles = unifiedProfiles.length > 0;
+  const incompleteProfiles = unifiedProfiles.filter((p) => !(p.hasParent && p.hasChild));
+  const defaultPairProfile =
+    incompleteProfiles.find((p) => p.alias === state.activeAccount) ||
+    incompleteProfiles[0] ||
+    null;
   const initialPairRole =
-    activeProfileObj && !activeProfileObj.hasParent && activeProfileObj.hasChild
+    defaultPairProfile && !defaultPairProfile.hasParent && defaultPairProfile.hasChild
       ? "parent"
       : "student";
 
+  const findProfileByLogin = (loginCandidate) => {
+    const clean = (loginCandidate || "").trim().toLowerCase();
+    if (!clean) return null;
+    return (
+      unifiedProfiles.find(
+        (p) =>
+          (p.parentUsername && p.parentUsername.toLowerCase() === clean) ||
+          (p.studentUsername && p.studentUsername.toLowerCase() === clean)
+      ) || null
+    );
+  };
+
   const profileSelectOptions = unifiedProfiles
     .map((p) => {
-      const selected = activeProfileObj && p.alias === activeProfileObj.alias ? "selected" : "";
-      const modeTag =
-        p.hasParent && p.hasChild
-          ? "Rodzic + Dziecko"
-          : p.hasParent
-            ? "Tylko Rodzic"
-            : "Tylko Dziecko";
-      return `<option value="${escapeHtml(p.alias)}" data-has-parent="${p.hasParent ? "1" : "0"}" data-has-child="${p.hasChild ? "1" : "0"}" data-suggested-student="${escapeHtml(p.suggestedStudent)}" data-suggested-parent="${escapeHtml(p.suggestedParent)}" ${selected}>Profil: ${escapeHtml(p.displayName)} (${escapeHtml(modeTag)})</option>`;
+      const isComplete = p.hasParent && p.hasChild;
+      if (isComplete) {
+        return `<option value="${escapeHtml(p.alias)}" disabled data-complete="1" data-has-parent="1" data-has-child="1">Profil: ${escapeHtml(p.displayName)} (✓ Rodzic + Dziecko już połączone)</option>`;
+      }
+      const selected = defaultPairProfile && p.alias === defaultPairProfile.alias ? "selected" : "";
+      const modeTag = p.hasParent
+        ? "Tylko Rodzic — brak konta dziecka"
+        : "Tylko Dziecko — brak konta rodzica";
+      return `<option value="${escapeHtml(p.alias)}" data-complete="0" data-has-parent="${p.hasParent ? "1" : "0"}" data-has-child="${p.hasChild ? "1" : "0"}" data-parent-login="${escapeHtml(p.parentUsername)}" data-student-login="${escapeHtml(p.studentUsername)}" data-suggested-student="${escapeHtml(p.suggestedStudent)}" data-suggested-parent="${escapeHtml(p.suggestedParent)}" ${selected}>Profil: ${escapeHtml(p.displayName)} (${escapeHtml(modeTag)})</option>`;
     })
     .join("");
 
   wrapper.innerHTML = `
-    <!-- Section 1: Step 1 (Create Profile) -> Profiles Table -> Step 2 (Pair Second Account, shown when profiles > 0) -->
+    <!-- Section 1: Step 1 (Create Profile) -> Profiles Table -> Step 2 (Pair Missing Second Account) -->
     <div class="surface-panel content-card data-table-card">
       <div class="pi-action-bar" style="border-left:0;border-right:0;border-top:0;">
         <span class="toolbar-title" style="font-size:12px;">KONTA LIBRUS SYNERGIA (RODZIC / DZIECKO)</span>
@@ -2469,21 +2487,25 @@ async function renderVaultAndCalendarModule() {
         </table>
       </div>
 
-      ${hasConfiguredProfiles ? `
-      <!-- STEP 2: Pair Missing Child or Parent Account to an Existing Profile -->
+      ${hasConfiguredProfiles && incompleteProfiles.length > 0 ? `
+      <!-- STEP 2: Pair Missing Child or Parent Account to an Incomplete Profile -->
       <div class="pi-action-bar" style="border-left:0;border-right:0;border-bottom:0;flex-wrap:wrap;gap:8px;padding:10px 14px;">
-        <span id="pairBarTitle" class="toolbar-title" style="font-size:11px;color:var(--accent-primary);">KROK 2 (OPCJONALNIE) · DOŁĄCZ DRUGIE KONTO DO PROFILU:</span>
-        <select id="studentPairProfileSelect" class="pi-select" style="min-width:190px;">
+        <span id="pairBarTitle" class="toolbar-title" style="font-size:11px;color:var(--accent-primary);">KROK 2 (OPCJONALNIE) · DOŁĄCZ BRAKUJĄCE KONTO DO PROFILU:</span>
+        <select id="studentPairProfileSelect" class="pi-select" style="min-width:210px;">
           ${profileSelectOptions}
         </select>
-        <select id="studentPairRoleSelect" class="pi-select" style="min-width:185px;">
-          <option value="student" ${initialPairRole === "student" ? "selected" : ""}>Połącz konto dziecka (z „u”)</option>
-          <option value="parent" ${initialPairRole === "parent" ? "selected" : ""}>Połącz konto rodzica (bez „u”)</option>
+        <select id="studentPairRoleSelect" class="pi-select" style="min-width:195px;">
+          <option id="pairOptStudent" value="student" ${initialPairRole === "student" ? "selected" : ""}>Połącz konto dziecka (z „u”)</option>
+          <option id="pairOptParent" value="parent" ${initialPairRole === "parent" ? "selected" : ""}>Połącz konto rodzica (bez „u”)</option>
         </select>
         <input id="studentPairLoginInput" class="input-field" style="max-width:195px;" placeholder="Login" value="" />
         <input id="studentPairPasswordInput" type="password" class="input-field" style="max-width:180px;" placeholder="Hasło do Librusa" />
         <button id="saveStudentPairBtn" class="btn-primary btn-xs" type="button">+ Połącz konto</button>
         <span id="studentPairStatusMsg" class="card-subtitle" style="margin-left:auto;"></span>
+      </div>
+      ` : hasConfiguredProfiles ? `
+      <div class="pi-action-bar" style="border-left:0;border-right:0;border-bottom:0;padding:8px 14px;">
+        <span class="card-subtitle" style="color:var(--accent-emerald);font-weight:600;">✓ Wszystkie skonfigurowane profile mają już połączone oba konta (Rodzic + Dziecko).</span>
       </div>
       ` : ""}
     </div>
@@ -2529,7 +2551,7 @@ async function renderVaultAndCalendarModule() {
   els.contentArea.innerHTML = "";
   els.contentArea.appendChild(wrapper);
 
-  // Step 1: Suffix 'u' live detection & field swap helpers
+  // Step 1: Suffix 'u' & duplicate login live detection + field swap helpers
   const vaultLoginInput = document.getElementById("vaultLoginInput");
   const vaultPasswordInput = document.getElementById("vaultPasswordInput");
   const vaultStudentLoginInput = document.getElementById("vaultStudentLoginInput");
@@ -2546,6 +2568,20 @@ async function renderVaultAndCalendarModule() {
     vaultMoveToChildBtn.style.display = "none";
     vaultAppendUBtn.style.display = "none";
     vaultMoveToParentBtn.style.display = "none";
+
+    // Case 0: Check if entered login is already connected to an existing profile
+    const existingParentMatch = findProfileByLogin(parentLogin);
+    if (existingParentMatch) {
+      vaultLoginHintBar.style.display = "flex";
+      vaultLoginHintText.textContent = `Konto „${parentLogin}” jest już połączone z profilem „${existingParentMatch.displayName}” w tabeli poniżej.`;
+      return "duplicate_parent";
+    }
+    const existingChildMatch = findProfileByLogin(childLogin);
+    if (existingChildMatch) {
+      vaultLoginHintBar.style.display = "flex";
+      vaultLoginHintText.textContent = `Konto „${childLogin}” jest już połączone z profilem „${existingChildMatch.displayName}” w tabeli poniżej.`;
+      return "duplicate_child";
+    }
 
     // Case A: User entered a child login (ending with 'u', e.g. 8090546u) in the Parent login field
     if (parentLogin && /u$/i.test(parentLogin)) {
@@ -2617,9 +2653,11 @@ async function renderVaultAndCalendarModule() {
     showToast("Przeniesiono dane logowania do pól konta rodzica.");
   };
 
-  // Step 2: Dynamic Pairing Bar (Child or Parent account)
+  // Step 2: Dynamic Pairing Bar (only for incomplete profiles; locks already-connected role)
   const pairSelect = document.getElementById("studentPairProfileSelect");
   const pairRoleSelect = document.getElementById("studentPairRoleSelect");
+  const pairOptStudent = document.getElementById("pairOptStudent");
+  const pairOptParent = document.getElementById("pairOptParent");
   const pairLoginInput = document.getElementById("studentPairLoginInput");
   const pairPasswordInput = document.getElementById("studentPairPasswordInput");
   const saveStudentPairBtn = document.getElementById("saveStudentPairBtn");
@@ -2630,10 +2668,26 @@ async function renderVaultAndCalendarModule() {
     const opt = pairSelect.options[pairSelect.selectedIndex];
     const hasParent = opt ? opt.getAttribute("data-has-parent") === "1" : true;
     const hasChild = opt ? opt.getAttribute("data-has-child") === "1" : false;
+    const existingParentLogin = (opt && opt.getAttribute("data-parent-login")) || "";
+    const existingStudentLogin = (opt && opt.getAttribute("data-student-login")) || "";
     const suggestedStudent = (opt && opt.getAttribute("data-suggested-student")) || "";
     const suggestedParent = (opt && opt.getAttribute("data-suggested-parent")) || "";
 
-    if (updateRoleFromProfile) {
+    // Mark already-connected role as disabled so the system never suggests re-adding it
+    if (pairOptStudent) {
+      pairOptStudent.disabled = hasChild;
+      pairOptStudent.textContent = hasChild
+        ? `Konto dziecka (✓ już połączone${existingStudentLogin ? `: ${existingStudentLogin}` : ""})`
+        : "Połącz konto dziecka (z „u”)";
+    }
+    if (pairOptParent) {
+      pairOptParent.disabled = hasParent;
+      pairOptParent.textContent = hasParent
+        ? `Konto rodzica (✓ już połączone${existingParentLogin ? `: ${existingParentLogin}` : ""})`
+        : "Połącz konto rodzica (bez „u”)";
+    }
+
+    if (updateRoleFromProfile || (pairRoleSelect.value === "student" && hasChild) || (pairRoleSelect.value === "parent" && hasParent)) {
       if (!hasParent && hasChild) {
         pairRoleSelect.value = "parent";
       } else {
@@ -2644,7 +2698,8 @@ async function renderVaultAndCalendarModule() {
     const role = pairRoleSelect.value;
     if (role === "parent") {
       pairLoginInput.placeholder = "Login rodzica (bez „u”, np. 8090546)";
-      pairLoginInput.value = suggestedParent;
+      const existingMatch = findProfileByLogin(suggestedParent);
+      pairLoginInput.value = existingMatch ? "" : suggestedParent;
       if (pairPasswordInput) pairPasswordInput.placeholder = "Hasło rodzica do Librusa";
       saveStudentPairBtn.textContent = "+ Połącz konto rodzica";
       if (pairStatusMsg) {
@@ -2653,7 +2708,8 @@ async function renderVaultAndCalendarModule() {
       }
     } else {
       pairLoginInput.placeholder = "Login dziecka (z „u”, np. 8090546u)";
-      pairLoginInput.value = suggestedStudent;
+      const existingMatch = findProfileByLogin(suggestedStudent);
+      pairLoginInput.value = existingMatch ? "" : suggestedStudent;
       if (pairPasswordInput) pairPasswordInput.placeholder = "Hasło dziecka do Librusa";
       saveStudentPairBtn.textContent = "+ Połącz konto dziecka (ucznia)";
       if (pairStatusMsg) {
@@ -2669,12 +2725,30 @@ async function renderVaultAndCalendarModule() {
     pairRoleSelect.onchange = () => syncPairBarUi(false);
   }
 
+  if (pairLoginInput && pairStatusMsg) {
+    pairLoginInput.addEventListener("input", () => {
+      const typed = pairLoginInput.value.trim();
+      const dup = findProfileByLogin(typed);
+      if (dup) {
+        pairStatusMsg.style.color = "var(--accent-rose)";
+        pairStatusMsg.textContent = `Konto „${typed}” jest już połączone z profilem ${dup.displayName}!`;
+      } else {
+        const role = pairRoleSelect ? pairRoleSelect.value : "student";
+        pairStatusMsg.style.color = "var(--text-secondary)";
+        pairStatusMsg.textContent =
+          role === "parent"
+            ? "Login rodzica to numer bez litery „u” na końcu."
+            : "Login dziecka ma literę „u” na końcu (np. 8090546u).";
+      }
+    });
+  }
+
   if (saveStudentPairBtn) {
     saveStudentPairBtn.onclick = async () => {
       const targetAlias =
         (pairSelect && pairSelect.value) ||
+        (defaultPairProfile && defaultPairProfile.alias) ||
         state.activeAccount ||
-        (unifiedProfiles[0] && unifiedProfiles[0].alias) ||
         "";
       const role = pairRoleSelect ? pairRoleSelect.value : "student";
       const enteredLogin = pairLoginInput ? pairLoginInput.value.trim() : "";
@@ -2690,6 +2764,17 @@ async function renderVaultAndCalendarModule() {
           pairStatusMsg.textContent = msg;
         }
         showToast(msg);
+        return;
+      }
+
+      const dupProfile = findProfileByLogin(enteredLogin);
+      if (dupProfile) {
+        const msg = `Konto „${enteredLogin}” jest już połączone z profilem ${dupProfile.displayName}!`;
+        if (pairStatusMsg) {
+          pairStatusMsg.style.color = "var(--accent-rose)";
+          pairStatusMsg.textContent = msg;
+        }
+        showToast(msg, 5500);
         return;
       }
 
@@ -2845,6 +2930,26 @@ async function renderVaultAndCalendarModule() {
     const password = vaultPasswordInput.value;
     const student_username = vaultStudentLoginInput.value.trim();
     const student_password = vaultStudentPasswordInput.value;
+
+    // 0. Prevent adding a login that is already connected to an existing profile
+    const dupParent = findProfileByLogin(login);
+    if (dupParent) {
+      evaluateStep1LoginFields();
+      showToast(
+        `Konto „${login}” jest już połączone z profilem „${dupParent.displayName}”!`,
+        5500
+      );
+      return;
+    }
+    const dupChild = findProfileByLogin(student_username);
+    if (dupChild) {
+      evaluateStep1LoginFields();
+      showToast(
+        `Konto „${student_username}” jest już połączone z profilem „${dupChild.displayName}”!`,
+        5500
+      );
+      return;
+    }
 
     // 1. Prevent child login (suffix 'u') in the Parent login field
     if (login && /u$/i.test(login)) {
