@@ -286,6 +286,15 @@ def extract_text_from_bytes(filename: str, content_type: str | None, data: bytes
     return None
 
 
+class LibrusCaptchaRequiredError(ValueError):
+    """Raised when Librus Synergia requires Cloudflare Turnstile CAPTCHA unlock for a login."""
+
+    def __init__(self, username: str, message: str) -> None:
+        super().__init__(message)
+        self.username = username
+        self.captcha_required = True
+
+
 @dataclass
 class PooledServiceEntry:
     service: LibrusService
@@ -305,22 +314,95 @@ class StatelessLibrusHub:
         )
         self._pool: dict[str, PooledServiceEntry] = {}
         self._pool_lock = asyncio.Lock()
+        self._bad_credentials_cache: dict[str, tuple[float, str]] = {}
         self.study_assistant = StudyAssistant()
 
     @staticmethod
-    def _reset_client_session(client: Any, *, full: bool = True) -> None:
-        """Clear client cooldowns and invalidate upstream session state so the next call re-authenticates."""
+    def _cred_fingerprint(username: str, password: str) -> str:
+        u = (username or "").strip().lower()
+        p = password or ""
+        return hashlib.sha256(f"{u}\0{p}".encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _is_auth_failure(exc: BaseException) -> bool:
+        if isinstance(exc, LibrusCaptchaRequiredError):
+            return True
+        name = exc.__class__.__name__
+        if name in (
+            "AccessDeniedError",
+            "CredentialsRejectedError",
+            "AccountActionRequiredError",
+            "LibrusCaptchaRequiredError",
+        ):
+            return True
+        text = str(exc).lower()
+        return any(
+            k in text
+            for k in (
+                "access_denied",
+                "credentials_rejected",
+                "account_action_required",
+                "captcha_required",
+                "blokadę captcha",
+                "zablokowane przez captcha",
+            )
+        )
+
+    def _mark_bad_credentials(
+        self, username: str, password: str, exc: BaseException
+    ) -> None:
+        if not username or not password:
+            return
+        fp = self._cred_fingerprint(username, password)
+        self._bad_credentials_cache[fp] = (time.monotonic(), exc.__class__.__name__)
+
+    def _clear_bad_credentials(self, username: str, password: str) -> None:
+        if not username or not password:
+            return
+        fp = self._cred_fingerprint(username, password)
+        self._bad_credentials_cache.pop(fp, None)
+
+    def _is_bad_credentials(
+        self, username: str, password: str, *, ttl_seconds: float = 43200.0
+    ) -> bool:
+        if not username or not password:
+            return False
+        fp = self._cred_fingerprint(username, password)
+        item = self._bad_credentials_cache.get(fp)
+        if item is None:
+            return False
+        ts, _ = item
+        if (time.monotonic() - ts) < ttl_seconds:
+            return True
+        self._bad_credentials_cache.pop(fp, None)
+        return False
+
+    @staticmethod
+    def _reset_client_session(client: Any, *, full: bool = True) -> bool:
+        """Clear client cooldowns and invalidate upstream session state so the next call re-authenticates.
+
+        Never clears authentication cooldowns if the client never established an initial Synergia identity,
+        preventing failed credential submissions from being replayed and locking out the user's Librus account.
+        """
         cooldowns = getattr(client, "_cooldowns", None)
+        if getattr(client, "_identity", None) is None:
+            if isinstance(cooldowns, dict) and "authentication" in cooldowns:
+                return False
         if isinstance(cooldowns, dict):
+            auth_cd = cooldowns.get("authentication")
             cooldowns.clear()
+            if auth_cd is not None and getattr(client, "_identity", None) is None:
+                cooldowns["authentication"] = auth_cd
+                return False
         if full:
             inv = getattr(client, "_invalidate", None)
             if callable(inv):
                 inv()
-                return
+                return True
         inv_mod = getattr(client, "_invalidate_modern", None)
         if callable(inv_mod):
             inv_mod()
+        return True
 
     async def close_all(self) -> None:
         async with self._pool_lock:
@@ -426,6 +508,37 @@ class StatelessLibrusHub:
             return s[:16]
         return s
 
+    async def check_librus_captcha_needed(self, username: str) -> bool:
+        """Read-only check against https://api.librus.pl/OAuth/Captcha (is_needed=1).
+
+        Mirrors the checkCaptcha() call in Librus's official Authorization.js on #Login blur
+        and after login errors. Does not submit a password or increment failed login counters.
+        """
+        u = (username or "").strip()
+        if not u or getattr(self, "_demo_mode", False):
+            return False
+        timeout = aiohttp.ClientTimeout(total=4.0, connect=2.5)
+        headers = {
+            "Origin": "https://api.librus.pl",
+            "Referer": "https://api.librus.pl/OAuth/Authorization?client_id=46",
+            "X-Requested-With": "XMLHttpRequest",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        }
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    "https://api.librus.pl/OAuth/Captcha",
+                    data={"username": u, "is_needed": "1"},
+                    headers=headers,
+                ) as resp:
+                    if resp.status != 200:
+                        return False
+                    raw = await resp.text()
+                    data = json.loads(raw)
+                    return bool(isinstance(data, dict) and data.get("is_needed"))
+        except Exception:
+            return False
+
     async def verify_student_account(
         self, student_username: str, student_password: str
     ) -> dict[str, Any]:
@@ -441,6 +554,19 @@ class StatelessLibrusHub:
         # In demo/mock mode, accept without live Librus network call
         if getattr(self, "_demo_mode", False):
             return {"verified": True, "student_name": u}
+        role_label = "dziecka/ucznia" if u.lower().endswith("u") else "rodzica"
+        # 1. Pre-check /OAuth/Captcha (is_needed=1) before sending password so we never hit a CAPTCHA-locked account
+        if await self.check_librus_captcha_needed(u):
+            raise LibrusCaptchaRequiredError(
+                u,
+                f"Konto {role_label} „{u}” ma aktywną blokadę CAPTCHA w Librus Synergia („Przekroczono limit prób logowania”). "
+                "Otwórz w przeglądarce stronę https://portal.librus.pl/rodzina/synergia/loguj, wybierz „Cloudflare Turnstile” i zaloguj się jeden raz, aby zdjąć blokadę, a następnie wróć do bursLi i kliknij zapisz.",
+            )
+        if self._is_bad_credentials(u, p, ttl_seconds=60.0):
+            raise ValueError(
+                f"Librus Synergia przed chwilą odrzucił tę kombinację loginu i hasła dla konta {role_label} „{u}”. "
+                "Odczekaj chwilę lub upewnij się, że wpisujesz poprawne hasło do dziennika Synergia."
+            )
         creds_map = {
             "student_verify": AccountCredentials(
                 login=SecretStr(u),
@@ -453,6 +579,7 @@ class StatelessLibrusHub:
             await service.__aenter__()
             client = service.account("student_verify")
             info = await client.student_information(max_age_seconds=0.0)
+            self._clear_bad_credentials(u, p)
             student_name = str(getattr(info, "name", None) or getattr(info, "student_name", "") or u).strip()
             class_name = str(getattr(info, "class_name", "") or "").strip()
             return {
@@ -461,11 +588,18 @@ class StatelessLibrusHub:
                 "class_name": class_name,
             }
         except Exception as exc:
+            if self._is_auth_failure(exc):
+                self._mark_bad_credentials(u, p, exc)
+                if await self.check_librus_captcha_needed(u):
+                    raise LibrusCaptchaRequiredError(
+                        u,
+                        f"Konto {role_label} „{u}” zostało zablokowane przez CAPTCHA w Librus Synergia („Przekroczono limit prób logowania”). "
+                        "Otwórz w przeglądarce stronę https://portal.librus.pl/rodzina/synergia/loguj, wybierz „Cloudflare Turnstile” i zaloguj się jeden raz, aby zdjąć blokadę, a następnie wróć do bursLi.",
+                    ) from exc
             logger.warning("Librus account verification failed for %s: %s", u, type(exc).__name__)
-            role_label = "dziecka/ucznia" if u.lower().endswith("u") else "rodzica"
             raise ValueError(
-                f"Librus Synergia odrzucił logowanie dla konta {role_label} „{u}” (błędny login lub hasło). "
-                "Upewnij się, że wpisujesz hasło do dziennika Synergia (często inne niż hasło do e-mailowego Konta LIBRUS w aplikacji mobilnej — możesz je sprawdzić na portal.librus.pl/rodzina/synergia/loguj)."
+                f"Librus Synergia odrzucił hasło dla konta {role_label} „{u}” (błędny login lub hasło — blokada CAPTCHA nie jest aktywna). "
+                "Upewnij się, że podajesz hasło do dziennika Librus Synergia (portal.librus.pl/rodzina/synergia/loguj), a nie hasło do konta e-mail z aplikacji Konto LIBRUS."
             ) from exc
         finally:
             await self._safe_close_service(service)
@@ -511,13 +645,37 @@ class StatelessLibrusHub:
             )
             try:
                 try:
+                    if self._is_bad_credentials(acc.username, acc.password):
+                        raise RuntimeError("access_denied (cached circuit breaker)")
+                    if getattr(client, "_identity", None) is None and await self.check_librus_captcha_needed(acc.username):
+                        raise LibrusCaptchaRequiredError(
+                            acc.username,
+                            f"Konto „{acc.username}” wymaga odblokowania CAPTCHA (Cloudflare Turnstile) na stronie portal.librus.pl/rodzina/synergia/loguj.",
+                        )
                     info = await client.student_information(max_age_seconds=300.0)
-                except Exception:
+                    self._clear_bad_credentials(acc.username, acc.password)
+                except Exception as primary_exc:
+                    if self._is_auth_failure(primary_exc) and getattr(client, "_identity", None) is None:
+                        self._mark_bad_credentials(acc.username, acc.password, primary_exc)
                     student_key = f"{acc.alias}__student"
                     if has_student and student_key in entry.backends:
-                        info = await entry.service.account(student_key).student_information(
-                            max_age_seconds=300.0
-                        )
+                        if self._is_bad_credentials(acc.student_username, acc.student_password):
+                            raise primary_exc
+                        st_client = entry.service.account(student_key)
+                        try:
+                            if getattr(st_client, "_identity", None) is None and await self.check_librus_captcha_needed(acc.student_username):
+                                raise LibrusCaptchaRequiredError(
+                                    acc.student_username,
+                                    f"Konto „{acc.student_username}” wymaga odblokowania CAPTCHA (Cloudflare Turnstile) na stronie portal.librus.pl/rodzina/synergia/loguj.",
+                                )
+                            info = await st_client.student_information(
+                                max_age_seconds=300.0
+                            )
+                            self._clear_bad_credentials(acc.student_username, acc.student_password)
+                        except Exception as st_exc:
+                            if self._is_auth_failure(st_exc) and getattr(st_client, "_identity", None) is None:
+                                self._mark_bad_credentials(acc.student_username, acc.student_password, st_exc)
+                            raise
                     else:
                         raise
                 full_name = str(info.name or acc.alias.capitalize()).strip()
@@ -552,15 +710,19 @@ class StatelessLibrusHub:
                     "suggested_parent_username": suggested_parent,
                     "account_mode": account_mode,
                     "auth_error": False,
+                    "auth_captcha_required": False,
                     "auth_error_message": "",
                 }
             except Exception as exc:
                 logger.warning("Failed to load student_information for %s: %s", acc.alias, exc)
                 err_text = str(exc)
-                is_auth_err = (
-                    exc.__class__.__name__ == "AccessDeniedError"
-                    or "access_denied" in err_text.lower()
-                )
+                is_auth_err = self._is_auth_failure(exc)
+                captcha_needed = isinstance(exc, LibrusCaptchaRequiredError)
+                if is_auth_err and not captcha_needed:
+                    if acc.username and await self.check_librus_captcha_needed(acc.username):
+                        captcha_needed = True
+                    elif acc.student_username and await self.check_librus_captcha_needed(acc.student_username):
+                        captcha_needed = True
                 return {
                     "alias": acc.alias,
                     "account": acc.alias,
@@ -580,10 +742,15 @@ class StatelessLibrusHub:
                     "suggested_parent_username": suggested_parent,
                     "account_mode": account_mode,
                     "auth_error": is_auth_err,
+                    "auth_captcha_required": captcha_needed,
                     "auth_error_message": (
-                        "Hasło lub login zostały odrzucone przez Librus Synergia (access_denied)."
-                        if is_auth_err
-                        else err_text
+                        "Konto ma aktywną blokadę CAPTCHA w Librus Synergia („Przekroczono limit prób logowania”). Zaloguj się raz przez Cloudflare Turnstile na portal.librus.pl/rodzina/synergia/loguj, aby odblokować konto."
+                        if captcha_needed
+                        else (
+                            "Hasło lub login zostały odrzucone przez Librus Synergia (blokada CAPTCHA nie jest aktywna — sprawdź hasło do Synergii)."
+                            if is_auth_err
+                            else err_text
+                        )
                     ),
                 }
 
@@ -615,10 +782,11 @@ class StatelessLibrusHub:
         free_task = client.class_free_days(max_age_seconds=600.0)
         tt_res, free_res = await asyncio.gather(tt_task, free_task, return_exceptions=True)
         if isinstance(tt_res, BaseException):
-            with contextlib.suppress(Exception):
-                self._reset_client_session(client, full=True)
-                await client.student_information(max_age_seconds=0.0)
-                tt_res = await client.timetable(monday, max_age_seconds=0.0)
+            if getattr(client, "_identity", None) is not None:
+                with contextlib.suppress(Exception):
+                    if self._reset_client_session(client, full=True):
+                        await client.student_information(max_age_seconds=0.0)
+                        tt_res = await client.timetable(monday, max_age_seconds=0.0)
             if isinstance(tt_res, BaseException):
                 raise tt_res
 
@@ -1601,7 +1769,8 @@ class StatelessLibrusHub:
                     max_age_seconds=0.0 if force else 60.0,
                 )
             except Exception:
-                self._reset_client_session(client, full=True)
+                if getattr(client, "_identity", None) is None or not self._reset_client_session(client, full=True):
+                    raise
                 with contextlib.suppress(Exception):
                     await client.student_information(max_age_seconds=0.0)
                 res = await client.modern_messages(
@@ -1876,7 +2045,8 @@ class StatelessLibrusHub:
                     ref, allow_mark_read=True, max_age_seconds=180.0
                 )
             except Exception:
-                self._reset_client_session(client, full=True)
+                if getattr(client, "_identity", None) is None or not self._reset_client_session(client, full=True):
+                    raise
                 with contextlib.suppress(Exception):
                     await client.student_information(max_age_seconds=0.0)
                 det = await client.modern_message_content(
@@ -2366,7 +2536,8 @@ class StatelessLibrusHub:
                     MessageFolder.RECEIVED, limit=limit, max_pages=1, max_age_seconds=180.0
                 )
             except Exception:
-                self._reset_client_session(client, full=True)
+                if getattr(client, "_identity", None) is None or not self._reset_client_session(client, full=True):
+                    raise
                 with contextlib.suppress(Exception):
                     await client.student_information(max_age_seconds=0.0)
                 res = await client.modern_messages(

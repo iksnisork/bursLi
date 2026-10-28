@@ -609,15 +609,154 @@ async def test_auth_error_surfaced_in_profiles_and_exams(tmp_path: Path, monkeyp
             last_used_at=0.0,
         )
 
+    async def _no_captcha(_username: str) -> bool:
+        return False
+
     monkeypatch.setattr(hub, "_acquire_entry", _fake_acquire_entry)
+    monkeypatch.setattr(hub, "check_librus_captcha_needed", _no_captcha)
 
     profiles = await hub.get_profiles(payload)
     assert len(profiles) == 1
     assert profiles[0]["alias"] == "mila"
     assert profiles[0]["auth_error"] is True
+    assert profiles[0]["auth_captcha_required"] is False
     assert "odrzucone przez Librus Synergia" in profiles[0]["auth_error_message"]
 
     with pytest.raises(AccessDeniedError):
         await hub.get_exams_and_study_cards(payload, "mila", days_ahead=14)
+
+
+@pytest.mark.asyncio
+async def test_negative_auth_circuit_breaker_prevents_repeated_login_attempts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.librus_client import MessagingBackend, PooledServiceEntry
+
+    class AccessDeniedError(Exception):
+        pass
+
+    call_counts = {"parent": 0, "student": 0}
+
+    class CountingDeniedClient:
+        def __init__(self, role: str) -> None:
+            self.role = role
+            self._identity = None
+            self._cooldowns = {"authentication": (999999.0, "access_denied")}
+
+        async def student_information(self, **_kwargs: object) -> object:
+            call_counts[self.role] += 1
+            raise AccessDeniedError("access_denied")
+
+    class CountingDeniedService:
+        def account(self, key: str) -> CountingDeniedClient:
+            return CountingDeniedClient("student" if key.endswith("__student") else "parent")
+
+    hub = StatelessLibrusHub(local_config_path=tmp_path / "nonexistent.json")
+    # Verify _reset_client_session never clears authentication cooldown when _identity is None
+    dummy_client = CountingDeniedClient("parent")
+    assert hub._reset_client_session(dummy_client, full=True) is False
+    assert "authentication" in dummy_client._cooldowns
+
+    payload = UnsealedVaultPayload(
+        accounts=(
+            SealedAccount(
+                alias="mila",
+                username="10324857",
+                password="wrong-password",
+                student_username="10324857u",
+                student_password="wrong-password",
+            ),
+        )
+    )
+
+    async def _fake_acquire_entry(_vault: UnsealedVaultPayload) -> PooledServiceEntry:
+        return PooledServiceEntry(
+            service=CountingDeniedService(),  # type: ignore[arg-type]
+            backends={"mila": MessagingBackend.MODERN, "mila__student": MessagingBackend.MODERN},
+            created_at=0.0,
+            last_used_at=0.0,
+        )
+
+    async def _no_captcha(_username: str) -> bool:
+        return False
+
+    monkeypatch.setattr(hub, "_acquire_entry", _fake_acquire_entry)
+    monkeypatch.setattr(hub, "check_librus_captcha_needed", _no_captcha)
+
+    # First call hits parent and student once, then records both in _bad_credentials_cache
+    profiles1 = await hub.get_profiles(payload, force=True)
+    assert profiles1[0]["auth_error"] is True
+    assert call_counts == {"parent": 1, "student": 1}
+
+    # Subsequent calls (even with force=True or new pool entries) hit the circuit breaker with 0 upstream calls
+    profiles2 = await hub.get_profiles(payload, force=True)
+    assert profiles2[0]["auth_error"] is True
+    assert call_counts == {"parent": 1, "student": 1}
+
+
+@pytest.mark.asyncio
+async def test_captcha_precheck_blocks_login_and_surfaces_captcha_required(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.librus_client import LibrusCaptchaRequiredError, MessagingBackend, PooledServiceEntry
+
+    call_counts = {"parent": 0, "student": 0}
+
+    class ShouldNotBeCalledClient:
+        def __init__(self, role: str) -> None:
+            self.role = role
+            self._identity = None
+
+        async def student_information(self, **_kwargs: object) -> object:
+            call_counts[self.role] += 1
+            raise AssertionError("Should not attempt login when CAPTCHA is required")
+
+    class DummyService:
+        def account(self, key: str) -> ShouldNotBeCalledClient:
+            return ShouldNotBeCalledClient("student" if key.endswith("__student") else "parent")
+
+    hub = StatelessLibrusHub(local_config_path=tmp_path / "nonexistent.json")
+    payload = UnsealedVaultPayload(
+        accounts=(
+            SealedAccount(
+                alias="mila",
+                username="12195079",
+                password="parent-password",
+                student_username="12195079u",
+                student_password="student-password",
+            ),
+        )
+    )
+
+    async def _fake_acquire_entry(_vault: UnsealedVaultPayload) -> PooledServiceEntry:
+        return PooledServiceEntry(
+            service=DummyService(),  # type: ignore[arg-type]
+            backends={"mila": MessagingBackend.MODERN, "mila__student": MessagingBackend.MODERN},
+            created_at=0.0,
+            last_used_at=0.0,
+        )
+
+    async def _captcha_active(username: str) -> bool:
+        return username in {"12195079", "12195079u"}
+
+    monkeypatch.setattr(hub, "_acquire_entry", _fake_acquire_entry)
+    monkeypatch.setattr(hub, "check_librus_captcha_needed", _captcha_active)
+
+    profiles = await hub.get_profiles(payload, force=True)
+    assert profiles[0]["auth_error"] is True
+    assert profiles[0]["auth_captcha_required"] is True
+    assert "CAPTCHA" in profiles[0]["auth_error_message"]
+    # Zero password login attempts were sent because pre-check detected CAPTCHA!
+    assert call_counts == {"parent": 0, "student": 0}
+
+    with pytest.raises(LibrusCaptchaRequiredError) as exc_info:
+        await hub.verify_student_account(
+            student_username="12195079u",
+            student_password="student-password",
+        )
+    assert exc_info.value.username == "12195079u"
+    assert "CAPTCHA" in str(exc_info.value)
+
+
 
 

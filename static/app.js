@@ -204,7 +204,10 @@ async function apiFetch(path, options = {}) {
   const res = await fetch(path, options);
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data.error || `Błąd HTTP ${res.status}`);
+    const err = new Error(data.error || `Błąd HTTP ${res.status}`);
+    err.captchaRequired = Boolean(data.captcha_required);
+    err.username = data.username || "";
+    throw err;
   }
   return data;
 }
@@ -2313,6 +2316,9 @@ async function renderVaultAndCalendarModule() {
       alias;
     const className = serverMatch.class_name || item.class_name || "";
     const authError = Boolean(serverMatch.auth_error || item.auth_error);
+    const authCaptchaRequired = Boolean(
+      serverMatch.auth_captcha_required || item.auth_captcha_required
+    );
     const authErrorMessage = serverMatch.auth_error_message || item.auth_error_message || "";
     return {
       alias,
@@ -2327,6 +2333,7 @@ async function renderVaultAndCalendarModule() {
       suggestedStudent,
       suggestedParent,
       authError,
+      authCaptchaRequired,
       authErrorMessage,
       raw: item,
     };
@@ -2356,7 +2363,10 @@ async function renderVaultAndCalendarModule() {
       }
 
       if (p.authError) {
-        modeBadge = `<span class="badge badge-cancelled" title="${escapeHtml(p.authErrorMessage)}">⚠ BŁĄD LOGOWANIA LIBRUS (ODRZUCONE HASŁO)</span> ${modeBadge}`;
+        const errTag = p.authCaptchaRequired
+          ? "⚠ BLOKADA CAPTCHA W LIBRUSIE (ODBLOKUJ NA PORTAL.LIBRUS.PL)"
+          : "⚠ BŁĄD LOGOWANIA LIBRUS (ODRZUCONE HASŁO)";
+        modeBadge = `<span class="badge badge-cancelled" title="${escapeHtml(p.authErrorMessage)}">${errTag}</span> ${modeBadge}`;
       }
 
       if (p.className) {
@@ -2482,28 +2492,34 @@ async function renderVaultAndCalendarModule() {
     );
   };
 
+  const anyCaptchaLocked = brokenProfiles.some((bp) => bp.authCaptchaRequired);
   const authDiagnosisBannerHtml =
     brokenProfiles.length > 0
       ? `
       <div class="pi-action-bar" style="border-left:0;border-right:0;background:rgba(225, 29, 72, 0.08);border-bottom:1px solid var(--accent-rose);flex-direction:column;align-items:stretch;gap:8px;padding:12px 14px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
           <span style="font-family:var(--accent-mono);font-size:11.5px;font-weight:700;color:var(--accent-rose);">
-            ⚠ LIBRUS SYNERGIA ODRZUCIŁ LOGOWANIE (ACCESS_DENIED) DLA PROFILU: ${brokenProfiles.map((bp) => escapeHtml(bp.displayName.toUpperCase())).join(", ")}
+            ${
+              anyCaptchaLocked
+                ? `⚠ AKTYWNA BLOKADA CAPTCHA (PRZEKROCZONO LIMIT PRÓB) W LIBRUS SYNERGIA DLA PROFILU: ${brokenProfiles.map((bp) => escapeHtml(bp.displayName.toUpperCase())).join(", ")}`
+                : `⚠ LIBRUS SYNERGIA ODRZUCIŁ LOGOWANIE (ACCESS_DENIED) DLA PROFILU: ${brokenProfiles.map((bp) => escapeHtml(bp.displayName.toUpperCase())).join(", ")}`
+            }
           </span>
           <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
+            <a class="btn-outline btn-xs" href="https://portal.librus.pl/rodzina/synergia/loguj" target="_blank" rel="noopener noreferrer" style="border-color:var(--accent-rose);color:var(--accent-rose);font-weight:700;text-decoration:none;">1. Odblokuj CAPTCHA na portal.librus.pl ↗</a>
             ${brokenProfiles
               .map(
                 (bp) =>
-                  `<button class="btn-primary btn-xs edit-acc-btn" data-alias="${escapeHtml(bp.alias)}" type="button" style="background:var(--accent-rose);border-color:var(--accent-rose);color:#ffffff;font-weight:700;">Popraw hasło profilu „${escapeHtml(bp.displayName)}” w KROKU 1 ↓</button>`
+                  `<button class="btn-primary btn-xs edit-acc-btn" data-alias="${escapeHtml(bp.alias)}" type="button" style="background:var(--accent-rose);border-color:var(--accent-rose);color:#ffffff;font-weight:700;">2. Popraw hasło profilu „${escapeHtml(bp.displayName)}” w KROKU 1 ↓</button>`
               )
               .join("")}
           </div>
         </div>
         <div style="font-size:12px;line-height:1.5;color:var(--text-primary);">
-          <strong>Sprawdź 3 najczęstsze przyczyny błędu <code>access_denied</code> w Librusie:</strong><br/>
-          1. <strong>Hasło do Synergii vs Konto LIBRUS (aplikacja mobilna):</strong> W Librusie istnieją dwa różne hasła — konto e-mail w aplikacji mobilnej (<em>Konto LIBRUS</em>) oraz właściwe konto szkolne <strong>Librus Synergia</strong> (login cyfrowy np. <code>8090546</code> / <code>8090546u</code>). Tutaj podaj hasło, którym logujesz się bezpośrednio pod adresem <a href="https://portal.librus.pl/rodzina/synergia/loguj" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;font-weight:600;">portal.librus.pl/rodzina/synergia/loguj ↗</a>.<br/>
-          2. <strong>Osobne hasła rodzica i dziecka:</strong> Konto rodzica (bez „u”) oraz konto ucznia (z „u”) mają w Synergii dwa niezależne hasła.<br/>
-          3. <strong>Ważne dla Google Calendar (.ics):</strong> Ponieważ bursLi nie ma bazy danych, Twoje hasło jest zaszyfrowane wewnątrz samego linku <code>.ics</code> (<code>lfh1...</code>). Po poprawieniu hasła w KROKU 1 poniżej <strong>skopiuj nowy link .ics i dodaj go na nowo w Google Calendar</strong> (stary link w Google Calendar nadal zawiera stare hasło).
+          <strong>Jak odblokować konto i naprawić błąd <code>access_denied</code> w Librusie:</strong><br/>
+          1. <strong>Odblokowanie CAPTCHA (Cloudflare Turnstile):</strong> Po przekroczeniu limitu nieudanych logowań Librus włącza na koncie blokadę <em>Cloudflare Turnstile</em> przypisaną do domeny <code>api.librus.pl</code>. Otwórz oficjalną stronę <a href="https://portal.librus.pl/rodzina/synergia/loguj" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;font-weight:600;">portal.librus.pl/rodzina/synergia/loguj ↗</a>, kliknij <strong>Cloudflare Turnstile</strong> i zaloguj się jeden raz w przeglądarce — to natychmiast zdejmuje blokadę.<br/>
+          2. <strong>Hasło do Synergii vs Konto LIBRUS:</strong> Podaj hasło do dziennika szkolnego <strong>Librus Synergia</strong> (login cyfrowy np. <code>8090546</code> dla rodzica / <code>8090546u</code> dla ucznia — każde konto ma osobne hasło), a nie hasło do konta e-mail z aplikacji mobilnej.<br/>
+          3. <strong>Ważne dla Google Calendar (.ics):</strong> Twoje hasło jest zaszyfrowane wewnątrz samego linku <code>.ics</code> (<code>lfh1...</code>). Jeśli zmieniałeś hasło, usuń stary kalendarz z Google Calendar i po zapisaniu nowego hasła w KROKU 1 skopiuj nowy link <code>.ics</code>.
         </div>
       </div>
     `
@@ -2551,6 +2567,7 @@ async function renderVaultAndCalendarModule() {
         <div id="vaultLoginHintBar" style="display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:6px 10px;border-radius:4px;border:1px solid var(--accent-amber);background:rgba(245, 158, 11, 0.12);font-size:11.5px;">
           <span id="vaultLoginHintText" style="color:var(--text-primary);font-weight:500;"></span>
           <div style="display:inline-flex;gap:6px;flex-wrap:wrap;">
+            <a id="vaultOpenLibrusCaptchaLink" href="https://portal.librus.pl/rodzina/synergia/loguj" target="_blank" rel="noopener noreferrer" class="btn-primary btn-xs" style="display:none;text-decoration:none;background:var(--accent-rose);border-color:var(--accent-rose);color:#fff;">Otwórz Librus Synergia i odblokuj CAPTCHA ↗</a>
             <button id="vaultMoveToChildBtn" class="btn-primary btn-xs" type="button" style="display:none;">Przenieś do pól dziecka (ucznia) →</button>
             <button id="vaultAppendUBtn" class="btn-primary btn-xs" type="button" style="display:none;">Dopisz „u” na końcu loginu dziecka</button>
             <button id="vaultMoveToParentBtn" class="btn-outline btn-xs" type="button" style="display:none;">← Przenieś do pól rodzica</button>
@@ -2650,6 +2667,7 @@ async function renderVaultAndCalendarModule() {
   const vaultMoveToChildBtn = document.getElementById("vaultMoveToChildBtn");
   const vaultAppendUBtn = document.getElementById("vaultAppendUBtn");
   const vaultMoveToParentBtn = document.getElementById("vaultMoveToParentBtn");
+  const vaultOpenLibrusCaptchaLink = document.getElementById("vaultOpenLibrusCaptchaLink");
 
   const evaluateStep1LoginFields = () => {
     const parentLogin = (vaultLoginInput.value || "").trim();
@@ -2658,6 +2676,7 @@ async function renderVaultAndCalendarModule() {
     vaultMoveToChildBtn.style.display = "none";
     vaultAppendUBtn.style.display = "none";
     vaultMoveToParentBtn.style.display = "none";
+    if (vaultOpenLibrusCaptchaLink) vaultOpenLibrusCaptchaLink.style.display = "none";
     vaultLoginHintBar.style.borderColor = "var(--accent-amber)";
     vaultLoginHintBar.style.background = "rgba(245, 158, 11, 0.12)";
 
@@ -2733,9 +2752,17 @@ async function renderVaultAndCalendarModule() {
       saveVaultAccountBtn.textContent = `Zweryfikuj i zapisz hasło (${prof.displayName})`;
     }
     vaultLoginHintBar.style.display = "flex";
-    vaultLoginHintBar.style.borderColor = "var(--accent-primary)";
-    vaultLoginHintBar.style.background = "var(--pastel-sky-bg)";
-    vaultLoginHintText.textContent = `Edycja profilu „${prof.displayName}” — wpisz poprawne hasło do dziennika Librus Synergia (portal.librus.pl/rodzina/synergia/loguj) i kliknij przycisk zapisu.`;
+    if (prof.authCaptchaRequired) {
+      vaultLoginHintBar.style.borderColor = "var(--accent-rose)";
+      vaultLoginHintBar.style.background = "rgba(225, 29, 72, 0.10)";
+      vaultLoginHintText.textContent = `Profil „${prof.displayName}” wymaga odblokowania CAPTCHA na stronie Librus Synergia — zaloguj się tam raz i rozwiąż zabezpieczenie, a następnie kliknij przycisk zapisu tutaj.`;
+      if (vaultOpenLibrusCaptchaLink) vaultOpenLibrusCaptchaLink.style.display = "inline-flex";
+    } else {
+      vaultLoginHintBar.style.borderColor = "var(--accent-primary)";
+      vaultLoginHintBar.style.background = "var(--pastel-sky-bg)";
+      vaultLoginHintText.textContent = `Edycja profilu „${prof.displayName}” — wpisz poprawne hasło do dziennika Librus Synergia (portal.librus.pl/rodzina/synergia/loguj) i kliknij przycisk zapisu.`;
+      if (vaultOpenLibrusCaptchaLink) vaultOpenLibrusCaptchaLink.style.display = "none";
+    }
     const step1El = document.getElementById("vaultStep1Container");
     if (step1El && step1El.scrollIntoView) {
       step1El.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -3150,6 +3177,9 @@ async function renderVaultAndCalendarModule() {
       vaultLoginHintBar.style.borderColor = "var(--accent-rose)";
       vaultLoginHintBar.style.background = "rgba(225, 29, 72, 0.10)";
       vaultLoginHintText.textContent = `${err.message}`;
+      if (vaultOpenLibrusCaptchaLink) {
+        vaultOpenLibrusCaptchaLink.style.display = err.captchaRequired ? "inline-flex" : "none";
+      }
       showToast(`${err.message}`, 6500);
       return;
     }

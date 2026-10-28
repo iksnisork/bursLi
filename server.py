@@ -644,7 +644,16 @@ class DashboardServer:
             )
         except Exception as exc:
             logger.warning("Failed to save student account for %s: %s", alias, exc)
-            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+            captcha_req = bool(getattr(exc, "captcha_required", False))
+            return web.json_response(
+                {
+                    "ok": False,
+                    "captcha_required": captcha_req,
+                    "username": getattr(exc, "username", ""),
+                    "error": str(exc),
+                },
+                status=400,
+            )
 
     async def handle_profiles(self, request: web.Request) -> web.Response:
         force = request.query.get("refresh") == "1"
@@ -1050,6 +1059,16 @@ class DashboardServer:
         try:
             profiles = await self.hub.get_profiles(vault)
             prof = next((p for p in profiles if p["alias"] == alias), {"first_name": alias})
+            if prof.get("auth_error"):
+                logger.warning(
+                    "Skipping .ics feed %s for %s due to active Librus auth_error (circuit breaker)",
+                    feed,
+                    alias,
+                )
+                return web.Response(
+                    text="Librus authentication failed (invalid credentials or account locked). Calendar sync paused to prevent account lockout.",
+                    status=403,
+                )
             prof_name = prof.get("first_name") or alias.capitalize()
 
             if feed == "timetable":
@@ -1102,6 +1121,13 @@ class DashboardServer:
         token = request.match_info.get("token", "").strip()
         alias = request.match_info.get("alias", "").strip()
         feed = request.match_info.get("feed", "").strip()
+
+        # Revoked stale .ics tokens with invalid credentials that Google Calendar polls every hour
+        if token.startswith(("lfh1.ht3pwAZ6E93siVDjNaI7", "lfh1.aAY3n8He6w6aLAw_zSI_")):
+            return web.Response(
+                text="This calendar subscription token has been revoked due to invalid Librus credentials. Please remove this calendar and generate a new .ics link.",
+                status=410,
+            )
 
         try:
             vault = self._overlay_local_student_accounts(
