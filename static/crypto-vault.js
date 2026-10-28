@@ -149,6 +149,8 @@
 
   async function addOrUpdateAccount({ alias, label, login, password, student_username, student_password }) {
     const accounts = await loadAccounts();
+    const explicitParentLogin = login !== undefined ? String(login || "").trim() : "";
+    const explicitParentPass = password !== undefined ? String(password || "") : "";
     const resolvedStudentUser =
       student_username !== undefined
         ? String(student_username || "").trim()
@@ -157,27 +159,44 @@
       student_password !== undefined
         ? String(student_password || "")
         : undefined;
-    const resolvedLogin = String(login || resolvedStudentUser || "").trim();
-    const resolvedPassword = String(password || resolvedStudentPass || "");
-    const normAlias = String(alias || label || resolvedLogin)
+    const seedLogin = explicitParentLogin || resolvedStudentUser || "";
+    const normAlias = String(alias || label || seedLogin)
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9_-]/g, "");
     const existingIdx = accounts.findIndex((a) => a.alias === normAlias);
     const prev = existingIdx >= 0 ? accounts[existingIdx] : {};
+    const prevHadParent = Boolean(prev.login && prev.login !== prev.student_username);
+
+    let finalLogin = "";
+    let finalPassword = "";
+    if (explicitParentLogin && explicitParentPass) {
+      finalLogin = explicitParentLogin;
+      finalPassword = explicitParentPass;
+    } else if (prevHadParent) {
+      finalLogin = String(prev.login || "").trim();
+      finalPassword = String(prev.password || "");
+    } else {
+      finalLogin = String(resolvedStudentUser || prev.login || "").trim();
+      finalPassword = String(resolvedStudentPass || prev.password || "");
+    }
+
+    const finalStudentUser =
+      resolvedStudentUser !== undefined
+        ? resolvedStudentUser
+        : String(prev.student_username || "").trim();
+    const finalStudentPass =
+      resolvedStudentPass !== undefined
+        ? resolvedStudentPass
+        : String(prev.student_password || "");
+
     const entry = {
       alias: normAlias,
-      label: String(label || alias || normAlias).trim(),
-      login: resolvedLogin,
-      password: resolvedPassword,
-      student_username:
-        resolvedStudentUser !== undefined
-          ? resolvedStudentUser
-          : String(prev.student_username || "").trim(),
-      student_password:
-        resolvedStudentPass !== undefined
-          ? resolvedStudentPass
-          : String(prev.student_password || ""),
+      label: String(label || prev.label || alias || normAlias).trim(),
+      login: finalLogin,
+      password: finalPassword,
+      student_username: finalStudentUser,
+      student_password: finalStudentPass,
     };
     if (existingIdx >= 0) {
       accounts[existingIdx] = entry;
