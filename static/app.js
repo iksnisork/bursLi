@@ -2549,22 +2549,36 @@ async function renderVaultAndCalendarModule() {
       ${authDiagnosisBannerHtml}
 
       <!-- Single-Account Form with Rodzic / Uczeń Role Selector & Auto-Merge -->
-      <div id="vaultStep1Container" class="pi-action-bar" style="border-left:0;border-right:0;background:var(--bg-subtle);flex-direction:column;align-items:stretch;gap:8px;padding:12px 14px;">
+      <div id="vaultStep1Container" class="pi-action-bar" style="border-left:0;border-right:0;background:var(--panel-soft);flex-direction:column;align-items:stretch;gap:10px;padding:12px 14px;">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
           <span id="vaultStep1Title" class="toolbar-title" style="font-size:11px;color:var(--accent-primary);">DODAJ LUB POŁĄCZ KONTO LIBRUS SYNERGIA (WYBIERZ TYP KONTA: RODZIC ALBO UCZEŃ):</span>
           <span class="card-subtitle">Dodawaj po jednym koncie naraz. Gdy dodasz drugie konto tego samego ucznia, konta <strong>Rodzic + Uczeń</strong> połączą się automatycznie.</span>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <div role="group" aria-label="Wybierz typ konta Librus Synergia" style="display:inline-flex;border:1px solid var(--border-strong);border-radius:4px;overflow:hidden;flex-shrink:0;">
-            <button id="vaultRoleParentBtn" type="button" class="btn-xs" style="border:0;border-radius:0;padding:6px 12px;font-weight:700;cursor:pointer;">Rodzic (bez „u”)</button>
-            <button id="vaultRoleStudentBtn" type="button" class="btn-xs" style="border:0;border-radius:0;border-left:1px solid var(--border-strong);padding:6px 12px;font-weight:700;cursor:pointer;">Uczeń (z „u”)</button>
+        <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;">
+          <div style="display:flex;flex-direction:column;gap:4px;flex:0 0 auto;">
+            <span style="font-family:var(--mono);font-size:10.5px;font-weight:700;color:var(--muted-strong);">1. TYP KONTA LIBRUS</span>
+            <div role="group" aria-label="Wybierz typ konta Librus Synergia" style="display:inline-flex;border:1px solid var(--line-strong);height:32px;overflow:hidden;">
+              <button id="vaultRoleParentBtn" type="button" class="btn-xs" style="border:0;border-radius:0;padding:0 12px;height:100%;font-weight:700;cursor:pointer;">Rodzic (bez „u”)</button>
+              <button id="vaultRoleStudentBtn" type="button" class="btn-xs" style="border:0;border-radius:0;border-left:1px solid var(--line-strong);padding:0 12px;height:100%;font-weight:700;cursor:pointer;">Uczeń (z „u”)</button>
+            </div>
           </div>
-          <input id="vaultLabelInput" class="input-field" style="max-width:155px;" placeholder="Imię ucznia (np. Ola)" />
+          <label for="vaultLabelInput" style="display:flex;flex-direction:column;gap:4px;flex:1 1 150px;min-width:140px;">
+            <span style="font-family:var(--mono);font-size:10.5px;font-weight:700;color:var(--muted-strong);">2. IMIĘ UCZNIA (PROFIL)</span>
+            <input id="vaultLabelInput" class="input-field" style="width:100%;min-width:0;flex:none;" placeholder="np. Ola" />
+          </label>
           <input id="vaultAliasInput" type="hidden" value="" />
-          <input id="vaultLoginInput" class="input-field" style="max-width:195px;" placeholder="Login rodzica (np. 8090546)" />
-          <input id="vaultPasswordInput" type="password" class="input-field" style="max-width:185px;" placeholder="Hasło rodzica do Synergii" />
-          <button id="saveVaultAccountBtn" class="action-button" type="button" style="margin-left:auto;">+ Zweryfikuj i dodaj konto</button>
-          <button id="cancelVaultEditBtn" class="btn-outline btn-xs" type="button" style="display:none;">Wyczyść</button>
+          <label for="vaultLoginInput" style="display:flex;flex-direction:column;gap:4px;flex:1.3 1 210px;min-width:170px;">
+            <span id="vaultLoginFieldLabel" style="font-family:var(--mono);font-size:10.5px;font-weight:700;color:var(--muted-strong);">3. LOGIN RODZICA — BEZ „U” (NP. 8090546)</span>
+            <input id="vaultLoginInput" class="input-field" style="width:100%;min-width:0;flex:none;" placeholder="np. 8090546" />
+          </label>
+          <label for="vaultPasswordInput" style="display:flex;flex-direction:column;gap:4px;flex:1.2 1 190px;min-width:160px;">
+            <span id="vaultPasswordFieldLabel" style="font-family:var(--mono);font-size:10.5px;font-weight:700;color:var(--muted-strong);">4. HASŁO RODZICA DO SYNERGII</span>
+            <input id="vaultPasswordInput" type="password" class="input-field" style="width:100%;min-width:0;flex:none;" placeholder="Hasło do Synergii" />
+          </label>
+          <div style="display:flex;align-items:center;gap:6px;flex:0 0 auto;min-height:32px;">
+            <button id="saveVaultAccountBtn" class="action-button" type="button" style="height:32px;">+ Zweryfikuj i dodaj konto</button>
+            <button id="cancelVaultEditBtn" class="btn-outline btn-xs" type="button" style="display:none;height:32px;">Wyczyść</button>
+          </div>
         </div>
         <div id="vaultLoginHintBar" style="display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:6px 10px;border-radius:4px;border:1px solid var(--accent-amber);background:rgba(245, 158, 11, 0.12);font-size:11.5px;">
           <span id="vaultLoginHintText" style="color:var(--text-primary);font-weight:500;"></span>
@@ -2651,6 +2665,8 @@ async function renderVaultAndCalendarModule() {
   const vaultAliasInput = document.getElementById("vaultAliasInput");
   const vaultLoginInput = document.getElementById("vaultLoginInput");
   const vaultPasswordInput = document.getElementById("vaultPasswordInput");
+  const vaultLoginFieldLabel = document.getElementById("vaultLoginFieldLabel");
+  const vaultPasswordFieldLabel = document.getElementById("vaultPasswordFieldLabel");
   const vaultStep1Title = document.getElementById("vaultStep1Title");
   const saveVaultAccountBtn = document.getElementById("saveVaultAccountBtn");
   const cancelVaultEditBtn = document.getElementById("cancelVaultEditBtn");
@@ -2695,22 +2711,28 @@ async function renderVaultAndCalendarModule() {
   const syncRoleButtonsUi = () => {
     const isParent = selectedRole === "parent";
     if (vaultRoleParentBtn) {
-      vaultRoleParentBtn.style.background = isParent ? "var(--accent-primary)" : "var(--bg-surface)";
-      vaultRoleParentBtn.style.color = isParent ? "#ffffff" : "var(--text-secondary)";
+      vaultRoleParentBtn.style.background = isParent ? "var(--accent-primary)" : "var(--control-bg)";
+      vaultRoleParentBtn.style.color = isParent ? "#ffffff" : "var(--muted-strong)";
     }
     if (vaultRoleStudentBtn) {
-      vaultRoleStudentBtn.style.background = !isParent ? "var(--accent-primary)" : "var(--bg-surface)";
-      vaultRoleStudentBtn.style.color = !isParent ? "#ffffff" : "var(--text-secondary)";
+      vaultRoleStudentBtn.style.background = !isParent ? "var(--accent-primary)" : "var(--control-bg)";
+      vaultRoleStudentBtn.style.color = !isParent ? "#ffffff" : "var(--muted-strong)";
+    }
+    if (vaultLoginFieldLabel) {
+      vaultLoginFieldLabel.textContent = isParent
+        ? "3. LOGIN RODZICA — BEZ „U” (NP. 8090546)"
+        : "3. LOGIN UCZNIA — Z „U” NA KOŃCU (NP. 8090546U)";
+    }
+    if (vaultPasswordFieldLabel) {
+      vaultPasswordFieldLabel.textContent = isParent
+        ? "4. HASŁO RODZICA DO SYNERGII"
+        : "4. HASŁO UCZNIA DO SYNERGII";
     }
     if (vaultLoginInput) {
-      vaultLoginInput.placeholder = isParent
-        ? "Login rodzica bez „u” (np. 8090546)"
-        : "Login ucznia z „u” (np. 8090546u)";
+      vaultLoginInput.placeholder = isParent ? "np. 8090546" : "np. 8090546u";
     }
     if (vaultPasswordInput) {
-      vaultPasswordInput.placeholder = isParent
-        ? "Hasło rodzica do Synergii"
-        : "Hasło ucznia do Synergii";
+      vaultPasswordInput.placeholder = isParent ? "Hasło rodzica" : "Hasło ucznia";
     }
   };
 
